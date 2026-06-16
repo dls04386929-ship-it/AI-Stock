@@ -152,26 +152,34 @@ if not df_stocks.empty:
     # 建立頁籤分門別類顯示
     categories = list(STOCK_CONFIG.keys())
     tabs = st.tabs(categories)
+# --- 區塊二：產業鏈分組看板 ---
+st.markdown(f"## 🚀 AI & 低軌衛星全球產業鏈觀測站 (更新時間: {datetime.now().strftime('%H:%M:%S')})")
+
+if not df_stocks.empty:
+    # 建立頁籤分門別類顯示
+    categories = list(STOCK_CONFIG.keys())
+    tabs = st.tabs(categories)
     
     for i, cat in enumerate(categories):
         with tabs[i]:
             st.markdown(f"### 🎯 群組：{cat}")
             
-            # 篩選出該產業別的資料
+            # 篩選出該產業別的資料并徹底複製，避免干擾原始資料
             df_sub = df_stocks[df_stocks['產業分組'] == cat].copy()
             
-            # 美化漲跌幅欄位顯示
-            df_sub['今日漲跌幅'] = df_sub['今日漲跌幅'].apply(lambda x: f"{x:+.2f}%")
+            # 建立一個專門用來呈現給表格看的 DataFrame，保留原始數值給圖表用
+            df_display = df_sub.copy()
+            df_display['今日漲跌幅'] = df_display['今日漲跌幅'].apply(lambda x: f"{x:+.2f}%")
+            df_display = df_display.drop(columns=['產業分組'])
             
-            # 整理輸出表格
-            df_display = df_sub.drop(columns=['產業分組'])
+            # 顯示美化後的表格
             st.dataframe(df_display, use_container_width=True, hide_index=True)
             
-            # 畫出該分組的即時漲跌幅圖表
+            # 繪製該分組的即時漲跌幅圖表（直接使用原始的數值 df_sub['今日漲跌幅']，不需 .str.replace）
             fig = go.Figure(go.Bar(
                 x=df_sub['公司名稱'] + " (" + df_sub['國家'] + ")",
-                y=df_sub['今日漲跌幅'].str.replace('%','').astype(float),
-                marker_color=['#ff4b4b' if float(x.replace('%','')) < 0 else '#00f574' for x in df_sub['今日漲跌幅']]
+                y=df_sub['今日漲跌幅'], 
+                marker_color=['#ff4b4b' if x < 0 else '#00f574' for x in df_sub['今日漲跌幅']]
             ))
             fig.update_layout(
                 yaxis_title="今日漲跌幅 (%)",
