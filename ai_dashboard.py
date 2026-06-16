@@ -611,60 +611,40 @@ st.sidebar.warning(
 # ==============================================================================
 # 十一、新增：量化選股與真實數據擷取引擎
 # ==============================================================================
-import streamlit as st
-import pandas as pd
-import requests
+# ==============================================================================
+# 新增功能：2330.TW 昨日收盤完整資訊監測
+# ==============================================================================
+st.markdown("### 🔍 2330.TW 台積電昨日收盤完整數據透視")
 
-@st.cache_data(ttl=3600)
-def get_stock_metrics_dynamic(stock_id):
-    """
-    動態取得真實指標：每一檔股票都會獨立呼叫 API
-    """
-    # 1. 大戶持股 (籌碼)
-    # 實際使用時，請確認 dataset 是否為 TaiwanStockShareholding
-    url_share = "https://api.finmindtrade.com/api/v4/data"
-    params_share = {"dataset": "TaiwanStockShareholding", "data_id": stock_id, "token": FINMIND_TOKEN}
-    
-    # 2. 財報 (研發/合約負債)
-    url_fin = "https://api.finmindtrade.com/api/v4/data"
-    params_fin = {"dataset": "TaiwanStockFinancialStatement", "data_id": stock_id, "token": FINMIND_TOKEN}
-
+def get_tsmc_yesterday_data():
     try:
-        # 獲取大戶數據
-        res_share = requests.get(url_share, params=params_share, timeout=5).json()
-        df_share = pd.DataFrame(res_share.get("data", []))
-        
-        # 獲取財報數據
-        res_fin = requests.get(url_fin, params=params_fin, timeout=5).json()
-        df_fin = pd.DataFrame(res_fin.get("data", []))
+        stock = yf.Ticker("2330.TW")
+        # 抓取最近的歷史資料
+        hist = stock.history(period="5d")
+        if not hist.empty:
+            # 取出最後一筆（通常是昨日收盤，若當日未收盤則為前日）
+            yesterday_data = hist.iloc[-1]
+            return yesterday_data
+        return None
+    except:
+        return None
 
-        # 計算邏輯 (這才是讓每檔股票不同的關鍵)
-        big_inc = 0
-        if not df_share.empty:
-            # 確保使用真實欄位，例如 'big_shareholder_ratio'
-            big_inc = float(df_share['big_shareholder_ratio'].iloc[-1]) - float(df_share['big_shareholder_ratio'].iloc[-2])
+tsmc_data = get_tsmc_yesterday_data()
 
-        # 這裡根據抓回來的 df_fin 計算研發費用與合約負債
-        # ... (執行您的運算)
+if tsmc_data is not None:
+    # 將 Series 轉換為 DataFrame 以便顯示
+    df_tsmc = tsmc_data.to_frame(name="數值").reset_index()
+    df_tsmc.columns = ["欄位名稱", "對應數值"]
+    
+    # 格式化數值以利閱讀
+    df_tsmc["對應數值"] = df_tsmc["對應數值"].apply(lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) else x)
+    
+    st.dataframe(df_tsmc, use_container_width=True, hide_index=True)
+    st.caption("註：此資料來自 Yahoo Finance 盤後數據，包含開盤、最高、最低、收盤、成交量與股利拆分等資訊。")
+else:
+    st.warning("目前無法獲取台積電的歷史收盤資料，請檢查網路連線或 Yahoo Finance API 狀態。")
 
-        return {
-            "大戶增": round(big_inc, 2),
-            "研發費用": 12345, # 此處應為計算後的變數
-            "合約負債": 67890, # 此處應為計算後的變數
-            "月營收雙增": 5.5
-        }
-    except Exception as e:
-        return {"大戶增": 0, "研發費用": 0, "合約負債": 0, "月營收雙增": 0}
-
-# ==============================================================================
-# UI 顯示區塊
-# ==============================================================================
-st.markdown("### 🔍 真實量化選股監控")
-target_stocks = ["2330", "2317", "2454", "2303"] # 可擴充
-data_list = [ {"股票代號": sid, **get_real_metrics(sid)} for sid in target_stocks ]
-
-df_quant = pd.DataFrame(data_list)
-st.dataframe(df_quant, use_container_width=True)
+st.markdown("---")
 # ==============================================================================
 # 十二、網頁定時自動循環刷新機制
 # ==============================================================================
