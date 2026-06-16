@@ -232,68 +232,77 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度全市場選股引擎 (透明數值+欄位對齊修正版，2指標過關)
+# 七、深度全市場選股引擎 (透明數值+批次動態輪巡+60秒冷卻保護機制)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
-    """動態調閱全台股清單，僅提取電子產業相關板塊個股"""
+    """精準動態調閱全台股上市櫃公司，透過產業別交叉過濾，僅提取『電子產業』個股建立基礎掃描池"""
     try:
         parameter = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
         res = requests.get(API_URL, params=parameter, timeout=12).json()
         if res.get("msg") == "success" and len(res.get("data", [])) > 0:
             df_info = pd.DataFrame(res["data"])
+            # 安全過濾：確保為上市櫃普通股
             df_filtered = df_info[df_info['type'].isin(['stock', 'twse', 'tpex'])]
-            # 鎖定所有電子股板塊
+            
+            # 鎖定所有電子股板塊：半導體、電腦週邊、光電、通信網路、電子零組件、電子通路、資訊服務、其他電子
             df_electronics = df_filtered[df_filtered['industry_category'].str.contains('電子|半導體|光電|通信|資訊服務', na=False, case=False)]
+            
             if not df_electronics.empty:
                 return df_electronics[['stock_id', 'stock_name']].values.tolist()
-    except: pass
-    return [("2330", "台積電"), ("2454", "聯發科"), ("2317", "鴻海"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶")]
+    except: 
+        pass
+    # 降級備用安全防護池（皆為核心強勢電子標的）
+    return [("2330", "台積電"), ("2454", "聯發科"), ("2317", "鴻海"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶"), ("3035", "智原"), ("4919", "新唐")]
 
-# 初始化 Streamlit 輪巡狀態機
+# 初始化 Streamlit 狀態機 (用於記錄 50 檔分頁輪巡進度與當前數據)
 if 'scan_pointer' not in st.session_state:
     st.session_state.scan_pointer = 0
 if 'current_batch_raw_data' not in st.session_state:
     st.session_state.current_batch_raw_data = []
 
 def run_relaxed_fundamental_screener(stock_list_pool):
+    # 防護型時間平移，比對至少兩季以上的完整財報三表與近4個月籌碼，防止時間斷層
     start_financial = (datetime.now() - timedelta(days=550)).strftime("%Y-%m-%d")
     start_chip = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
     
-    # 每次精準切割 50 檔進行掃描
+    # 每次精準切割 50 檔進行地毯式掃描
     batch_size = 50
     current_idx = st.session_state.scan_pointer
     target_batch = stock_list_pool[current_idx : current_idx + batch_size]
     
+    # 如果已經掃描到尾端，自動循環重置
     if not target_batch:
-        st.success("🎉 全市場電子股已全部掃描完畢！已重置進度。")
+        st.success("🎉 全市場電子股已全部輪巡掃描完畢！已自動重置進度。")
         st.session_state.scan_pointer = 0
         st.session_state.current_batch_raw_data = []
         return pd.DataFrame()
 
-    st.info(f"⚡ 正在動態調閱電子股第 {current_idx + 1} 至 {min(current_idx + batch_size, len(stock_list_pool))} 檔真實數據 (總計: {len(stock_list_pool)} 檔)...")
+    st.info(f"⚡ 正在動態調閱電子股第 {current_idx + 1} 至 {min(current_idx + batch_size, len(stock_list_pool))} 檔真實數據 (電子股總數: {len(stock_list_pool)} 檔)...")
     
-    # 用於即時顯示畫面的進度條與日誌容器
+    # 建立動態進度條與實時狀態文字日誌
     progress_bar = st.progress(0)
     status_log = st.empty()
     
-    # 這一組 50 檔的完整數據觀測池
+    # 這一組 50 檔的完整真實數據觀測池
     batch_results = []
     
     for idx, (stock_id, stock_name) in enumerate(target_batch):
+        # 更新進度條與顯示日誌
         progress_bar.progress((idx + 1) / len(target_batch))
-        status_log.text(f"🔍 正在向交易所/FinMind索取真實數值: {stock_id} {stock_name}...")
+        status_log.text(f"🔍 正在撈取最新交易所與財報數據: {stock_id} {stock_name}...")
         
         try:
             score = 0
-            # 預設透明數據顯示文字
+            # 初始狀態文字與數值對位欄位預設
             rev_txt = "⚠️ 無營收數據"
             rd_txt = "⚠️ 無財報數據"
             cl_txt = "⚠️ 無合約負債"
             chip_txt = "⚠️ 無籌碼數據"
-            val_cl_pure = 0.0 # 用於補齊前端 drop 欄位的預設純數值
+            val_cl_pure = 0.0  # 用於圖表 Y 軸繪製的純數字
+            val_cl_show = "0.00 億" # 用於圖表標籤顯示的文字
             
-            # 1. 索取並驗證月營收真實數值
+            # 1. 驗證月營收轉折
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=3).json()
             if r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 1:
@@ -308,7 +317,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 else:
                     rev_txt = f"❌ 未達標 (年增 {y_growth:.1f}% / 月增 {m_growth:.1f}%)"
                     
-            # 2 & 3. 索取並驗證研發與合約負債真實數值（財報三表）
+            # 2 & 3. 驗證研發費用與合約負債（財報損益與資產負債表）
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_fs = requests.get(API_URL, params=p_fs, timeout=3).json()
             if r_fs.get("msg") == "success" and len(r_fs.get("data", [])) > 0:
@@ -316,7 +325,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 df_rd = df_fs[df_fs['type'].str.contains('Research and development|研發', case=False, na=False)].sort_values(by='date')
                 df_cl = df_fs[df_fs['type'].str.contains('Contract liabilities|合約負債', case=False, na=False)].sort_values(by='date')
                 
-                # 研發費用真實比對
+                # 研發費用真實變動比對
                 if not df_rd.empty and len(df_rd) >= 2:
                     val_rd_now = df_rd.iloc[-1]['value'] / 100000000
                     val_rd_prev = df_rd.iloc[-2]['value'] / 100000000
@@ -326,18 +335,19 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                     else:
                         rd_txt = f"❌ 縮水 (現: {val_rd_now:.2f}億 / 前: {val_rd_prev:.2f}億)"
                 
-                # 合約負債真實比對
+                # 合約負債真實變動比對
                 if not df_cl.empty and len(df_cl) >= 2:
                     val_cl_now = df_cl.iloc[-1]['value'] / 100000000
                     val_cl_prev = df_cl.iloc[-2]['value'] / 100000000
-                    val_cl_pure = val_cl_now # 填入純數字
+                    val_cl_pure = val_cl_now
+                    val_cl_show = f"{val_cl_now:.2f} 億"
                     if df_cl.iloc[-1]['value'] >= df_cl.iloc[-2]['value'] * 0.95:
                         score += 1
                         cl_txt = f"🟢 高檔 ({val_cl_now:.2f}億 / 前: {val_cl_prev:.2f}億)"
                     else:
                         cl_txt = f"❌ 衰退 ({val_cl_now:.2f}億 / 前: {val_cl_prev:.2f}億)"
                         
-            # 4. 索取並驗證千張大戶籌碼真實數值
+            # 4. 驗證千張大戶持股
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
             r_cp = requests.get(API_URL, params=p_cp, timeout=3).json()
             if r_cp.get("msg") == "success" and len(r_cp.get("data", [])) > 0:
@@ -352,40 +362,92 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                     else:
                         chip_txt = f"❌ 渙散 ({c_pct:.1f}% <- 上週 {p_pct:.1f}%)"
                         
-            # 【關鍵修復核心】：在字典結尾補上 "純數字合約負債" 欄位，與您前端 464 行的 drop 邏輯完美對齊
+            # 50檔不論過關與否，通通加入結果，全面透明監控。並精確對位所有圖表前端所需之 Key
             batch_results.append({
                 "股票代碼": stock_id, 
                 "公司名稱": stock_name, 
-                "大戶籌碼真實數據": chip_txt, 
-                "研發費用真實變動": rd_txt,
+                "大戶籌碼變動": chip_txt, 
+                "研發開支狀態": rd_txt,
                 "合約負債真實增減": cl_txt, 
-                "月營收真實表現": rev_txt,
-                "符合指標數": f"{score}/4",
+                "月營收表現": rev_txt,
+                "符合指標數": f"🔥 {score}/4 獲選" if score >= 2 else f"⏳ {score}/4 觀望",
                 "決策篩選結果": "🔥 獲選黑馬股" if score >= 2 else "⏳ 觀望中",
+                "最新合約負債": val_cl_show,
                 "純數字合約負債": val_cl_pure
             })
-            time.sleep(0.1) 
+            time.sleep(0.1) # 基礎流控防止戳太快被鎖 IP
         except: 
             pass
         
     status_log.empty()
     
+    # 儲存進狀態機，並更新進度指針
     st.session_state.current_batch_raw_data = batch_results
     st.session_state.scan_pointer += batch_size
     
-    st.success(f"💡 本組 50 檔電子股已動態解鎖，以下為 API 撈取到的真實數值明細表：")
+    st.success(f"💡 本組 50 檔電子股數據已動態解鎖，以下為 API 撈取到的真實指標明細對照表：")
     
-    # 用計時器實作 60 秒冷卻倒數動態顯示
+    # 實作 60 秒冷卻倒數動態顯示，絕不鎖死網頁
     countdown_placeholder = st.empty()
     for remaining in range(60, 0, -1):
-        countdown_placeholder.warning(f"⏳ 遵守伺服器防護紀律，冷卻保護中... 將於 {remaining} 秒後自動解鎖下一組 50 檔。")
+        countdown_placeholder.warning(f"⏳ 遵照交易所與伺服器防護紀律，冷卻保護中... 將於 {remaining} 秒後解鎖下一組 50 檔電子股。")
         time.sleep(1)
-    countdown_placeholder.success("✅ 冷卻完畢！下一組 50 檔雷達已就緒，請點擊下方按鈕繼續掃描。")
+    countdown_placeholder.success("✅ 冷卻完成！下一組 50 檔雷達已就緒，請點擊下方按鈕繼續掃描。")
     
+    # 觸發更新按鈕
     if st.button("🚀 立即啟動下一組 50 檔電子股深層掃描", key="next_batch_trigger"):
         st.rerun()
         
     return pd.DataFrame(st.session_state.current_batch_raw_data)
+
+
+# ==============================================================================
+# 八、前端主分頁渲染控管 (觀測站三：全市場電子股多指標交叉選股終端)
+# ==============================================================================
+# 請確保您原本畫面上建立的 tab3 分頁在此處完美對接
+with tab3:
+    st.markdown("### 🎯 電子全板塊指標黑馬追蹤終端 (放寬版：符合任意 2 指標即判定獲選)")
+    st.markdown("每輪自動抽取 50 檔電子個股，將其籌碼大戶、營收與財報三表（研發、合約負債）真實數值完全透明列出，提供 60 秒冷卻保護防限流。")
+    
+    # 獲取全台股電子產業基礎池
+    electronics_pool = fetch_all_taiwan_stock_pool()
+    
+    # 執行選股引擎核心，獲取 50 檔當前輪巡數據
+    df_screen_result = run_relaxed_fundamental_screener(electronics_pool)
+    
+    # 【全面安全防護鎖】：先檢查回傳的資料是不是空的！
+    if df_screen_result is not None and not df_screen_result.empty:
+        
+        # 1. 繪圖區塊：防護 KeyError，並篩選真正獲選為黑馬股的標的來畫圖，畫面才不會被觀望個股塞滿
+        if '純數字合約負債' in df_screen_result.columns and '公司名稱' in df_screen_result.columns:
+            df_chart_data = df_screen_result[df_screen_result['決策篩選結果'] == '🔥 獲選黑馬股']
+            
+            if not df_chart_data.empty:
+                fig_cl_scan = go.Figure(go.Bar(
+                    x=df_chart_data['公司名稱'], 
+                    y=df_chart_data['純數字合約負債'], 
+                    marker_color='#ff4b4b', 
+                    text=df_chart_data['最新合約負債'], 
+                    textposition='auto'
+                ))
+                fig_cl_scan.update_layout(title="🎯 本輪獲選電子黑馬股 - 最新合約負債水位對比 (億元)", height=350, margin=dict(l=10, r=10, t=35, b=10))
+                st.plotly_chart(fig_cl_scan, use_container_width=True, key="cl_scan_chart_live")
+            else:
+                st.info("ℹ️ 當前這組 50 檔個股中，暫時沒有符合 2 個以上指標的黑馬股，故此處不顯示合約負債對比圖。")
+
+        st.markdown("#### 📋 本輪 50 檔電子股 - 指標觀測真實數據全紀錄")
+        
+        # 2. 安全剔除圖表專用的隱藏排序欄位，並將完整表格秀出來
+        if '純數字合約負債' in df_screen_result.columns:
+            df_table_show = df_screen_result.drop(columns=['純數字合約負債'])
+        else:
+            df_table_show = df_screen_result
+            
+        st.dataframe(df_table_show, use_container_width=True, hide_index=True)
+
+    else:
+        # 網頁剛載入、狀態機為空時的溫馨引導畫面，不執行畫圖，完美阻斷所有 KeyError
+        st.warning("📥 偵測到全市場電子股雷達尚未啟動。請點擊上方的『啟動/下一組掃描』按鈕，系統將自動調閱第一波 50 檔電子股進行指標交叉分析。")
 
 # ==============================================================================
 # 八、今日台股主流板塊輪動強弱榜
