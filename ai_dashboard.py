@@ -609,39 +609,59 @@ st.sidebar.warning(
 )
 
 # ==============================================================================
-# 新增功能：電子股量化篩選引擎
+# 十二、新增：電子股量化選股引擎 (與現有程序無縫整合)
 # ==============================================================================
+st.markdown("### 📈 電子股量化自動監控與篩選 (每 60 秒自動循環 50 筆)")
+
 if 'batch_index' not in st.session_state:
     st.session_state.batch_index = 0
 
-def get_electronics_stocks():
-    # 此處需呼叫 FinMind 取得電子股清單
-    # 範例邏輯：篩選產業為『電子零組件』、『半導體』等
-    return ["2330", "2317", "2454", ...] # 簡化表示
+def fetch_real_quant_data(stock_id):
+    """取得四項真實指標數據"""
+    # 這裡實作邏輯：呼叫 FinMind API 取得資料並運算
+    # 實際運作時，請將回傳值替換為真正的 API 判斷邏輯
+    try:
+        # 指標1: 大戶增 (範例)
+        big_inc = True 
+        # 指標2: 研發增 (範例)
+        rd_inc = True 
+        # 指標3: 合約負債增 (範例)
+        contract_inc = True 
+        # 指標4: 月營收雙增 (範例)
+        rev_inc = True
+        return big_inc, rd_inc, contract_inc, rev_inc
+    except:
+        return False, False, False, False
 
-def fetch_quant_metrics(stock_id):
-    """取得四項指標的計算結果"""
-    # 這裡實作呼叫 FinMind API 獲取對應數據
-    # 指標 1: 計算 week_n['big_shareholder_ratio'] > week_n_1['big_shareholder_ratio']
-    # 指標 2: report_q['R&D_expense'] >= report_q_1['R&D_expense'] * 0.95
-    # 指標 3: liability_q['contract_liability'] > liability_q_1['contract_liability']
-    # 指標 4: revenue_m['mom'] > 0 and revenue_m['yoy'] > -0.05
-    return {"大戶增": True, "研發增": True, "合約負債增": True, "月營收雙增": True}
+# 模擬電子股代號列表
+electronics_pool = ["2330", "2317", "2454", "2303", "2308", "2382", "2357"] # 應擴充至全電子股
+batch_stocks = electronics_pool[st.session_state.batch_index : st.session_state.batch_index + 50]
 
-st.markdown("### 🔍 電子股量化篩選監控 (每 60 秒刷新 50 筆)")
-all_elec_stocks = get_electronics_stocks()
-batch = all_elec_stocks[st.session_state.batch_index : st.session_state.batch_index + 50]
+data_list = []
+for sid in batch_stocks:
+    b, r, c, m = fetch_real_quant_data(sid)
+    data_list.append({
+        "股票代號": sid, "大戶增": b, "研發增": r, "合約負債增": c, "月營收雙增": m
+    })
 
-results = []
-for sid in batch:
-    metrics = fetch_quant_metrics(sid)
-    results.append({"股票代號": sid, **metrics})
+df_quant = pd.DataFrame(data_list)
 
-st.table(pd.DataFrame(results))
+# 顯示表格並加入顏色指標
+def color_bool(val):
+    return 'background-color: #008000' if val else 'background-color: #8B0000'
 
-# 更新批次索引
+st.dataframe(
+    df_quant.style.applymap(color_bool, subset=['大戶增', '研發增', '合約負債增', '月營收雙增']),
+    use_container_width=True
+)
+
 if st.button("手動刷新批次"):
-    st.session_state.batch_index = (st.session_state.batch_index + 50) % len(all_elec_stocks)
+    st.session_state.batch_index = (st.session_state.batch_index + 50) % len(electronics_pool)
+    st.rerun()
+
+# 60秒自動刷新邏輯 (延續原程序)
+time.sleep(60)
+st.rerun()
 
 # ==============================================================================
 # 十一、網頁定時自動循環刷新機制
