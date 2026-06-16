@@ -232,42 +232,58 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度全市場選股引擎 (極致放寬修正：完美放寬為『符合任意 2 項或以上指標』即可入榜)
+# 七、深度全市場選股引擎 (精準瞄準台股『所有電子產業板塊』，符合任意 2 項以上即入榜)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
-    # 優先將您定義的核心27檔台股提煉為選股基礎池，確保精準回傳且兼顧效能
-    pool = []
-    for group, stocks in TW_STOCK_CONFIG.items():
-        for t, name in stocks.items():
-            pure_id = t.split('.')[0]
-            pool.append([pure_id, name])
-    return pool
+    """精準動態調閱全台股上市櫃公司，透過產業別交叉過濾，僅提取『電子產業』個股建立池"""
+    try:
+        parameter = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
+        res = requests.get(API_URL, params=parameter, timeout=12).json()
+        if res.get("msg") == "success" and len(res.get("data", [])) > 0:
+            df_info = pd.DataFrame(res["data"])
+            # 安全過濾：確保為上市櫃普通股
+            df_filtered = df_info[df_info['type'].isin(['stock', 'twse', 'tpex'])]
+            
+            # 【電子股精準瞄準核心】：利用產業別(industry_category)鎖定所有電子板塊
+            # 涵蓋：半導體、電腦週邊、光電、通信網路、電子零組件、電子通路、資訊服務、其他電子
+            df_electronics = df_filtered[df_filtered['industry_category'].str.contains('電子|半導體|光電|通信|資訊服務', na=False, case=False)]
+            
+            if not df_electronics.empty:
+                return df_electronics[['stock_id', 'stock_name']].values.tolist()
+    except: 
+        pass
+    # 降級備用安全防護池（皆為核心強勢電子標的）
+    return [("2330", "台積電"), ("2454", "聯發科"), ("2317", "鴻海"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶"), ("3035", "智原"), ("4919", "新唐")]
 
-@st.cache_data(ttl=28800) # 快取防護 8 小時
+@st.cache_data(ttl=28800) # 快取保留 8 小時
 def run_relaxed_fundamental_screener(stock_list_pool):
-    # 將回溯時間拉長至 550 天與 120 天，確保能完美覆蓋並比對到至少兩季以上的完整財報三表，防止時間斷層
+    # 防護型時間平移，完美覆蓋至少兩季以上的完整財報三表，防止時間斷層
     start_financial = (datetime.now() - timedelta(days=550)).strftime("%Y-%m-%d")
     start_chip = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
     qualified_output = []
     
-    for stock_id, stock_name in stock_list_pool:
+    # 調配電子股掃描深度（設定為 150 檔，兼顧全電子股代表性與 API 流量熔斷安全防護）
+    max_scan_depth = min(len(stock_list_pool), 150) 
+    
+    for idx in range(max_scan_depth):
+        stock_id, stock_name = stock_list_pool[idx]
         try:
             score = 0
             metric_details = {"大戶籌碼": "❌ 未達標", "研發投入": "❌ 未達標", "合約負債": "❌ 未達標", "月營收表現": "❌ 未達標", "val_cl": 0.0}
             
-            # 1. 驗證月營收轉折
+            # 【1. 月營收轉折驗證】
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=3).json()
             if r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 1:
                 df_rev = pd.DataFrame(r_rev["data"]).sort_values(by='date')
                 l_rev = df_rev.iloc[-1]
-                # 營收條件放寬：月增率大於 0 或 年增率大於 -5%，皆視為營收底部回溫
+                # 電子股基本面轉折：月增率 > 0 或 年增率 > -5% (產業谷底復甦)
                 if l_rev['revenue_month_growth_rate'] > 0 or l_rev['revenue_year_growth_rate'] > -5:
                     score += 1
                     metric_details["月營收表現"] = f"🟢 績優 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
                     
-            # 2 & 3. 驗證研發費用與合約負債（財報三表細項）
+            # 【2 & 3. 財報三表（研發與合約負債）驗證】
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_fs = requests.get(API_URL, params=p_fs, timeout=3).json()
             if r_fs.get("msg") == "success" and len(r_fs.get("data", [])) > 0:
@@ -275,13 +291,13 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 df_rd = df_fs[df_fs['type'].str.contains('Research and development|研發', case=False, na=False)].sort_values(by='date')
                 df_cl = df_fs[df_fs['type'].str.contains('Contract liabilities|合約負債', case=False, na=False)].sort_values(by='date')
                 
-                # 研發費用：最新一季相較前一季未大幅萎縮（持平在 90% 以上）即過關
+                # 研發費用：電子股的命脈！最新一季研發不縮水（維持在前季 90% 以上）即視為持續投入
                 if not df_rd.empty and len(df_rd) >= 2:
                     if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.90: 
                         score += 1
                         metric_details["研發投入"] = "🟢 持續擴大"
                 
-                # 合約負債：最新一季大於或持平前一季的 95%（高檔維持）即過關
+                # 合約負債：電子建置與晶片在手訂單指標，最新一季大於或持平前一季的 95% 即過關
                 if not df_cl.empty and len(df_cl) >= 2:
                     val_now = df_cl.iloc[-1]['value']
                     val_prev = df_cl.iloc[-2]['value']
@@ -290,7 +306,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                         score += 1
                         metric_details["合約負債"] = f"🟢 高檔 ({val_now/100000000:.2f}億)"
                         
-            # 4. 驗證千張大戶持股
+            # 【4. 千張大戶籌碼驗證】
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
             r_cp = requests.get(API_URL, params=p_cp, timeout=3).json()
             if r_cp.get("msg") == "success" and len(r_cp.get("data", [])) > 0:
@@ -299,12 +315,12 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 if not df_1000.empty and len(df_1000) >= 2:
                     c_pct = df_1000.iloc[-1]['percent']
                     p_pct = df_1000.iloc[-2]['percent']
-                    # 大戶籌碼：最新一週持股比重相較上週未渙散（維持在 99% 以上）即過關
+                    # 大戶籌碼鎖定：最新一週籌碼未渙散（高於或等於上週持股比重之 99% 以上）
                     if c_pct >= p_pct * 0.99: 
                         score += 1
                         metric_details["大戶籌碼"] = f"🟢 穩固 ({c_pct:.1f}%)"
                         
-            # 【核心修正點】：滿足任意 2 指標以上即判定過關並納入轉折黑馬榜
+            # 【核心修正點】：只要滿足上述任意 2 個或以上指標，即判定為電子轉折股，精準納入黑馬榜
             if score >= 2:
                 qualified_output.append({
                     "股票代碼": stock_id, "公司名稱": stock_name, "符合指標數": f"🔥 {score}/4 獲選",
@@ -313,9 +329,10 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                     "純數字合約負債": metric_details["val_cl"]
                 })
                 
-            # 安全機制：每跑完一檔股票微幅停歇 0.1 秒，防止戳 API 太快觸發 FinMind 流量限制
+            # 安全間隔：每執行完一檔個股，微幅歇停 0.1 秒，確保 150 檔高強度掃描不會觸發 API 封鎖機制
             time.sleep(0.1)
-        except: pass
+        except: 
+            pass
     return pd.DataFrame(qualified_output)
 
 # ==============================================================================
