@@ -9,11 +9,11 @@ import plotly.graph_objects as go
 # ==============================================================================
 # 1. 網頁基礎配置與金鑰設定
 # ==============================================================================
-st.set_page_config(page_title="全球 AI & 衛星產業鏈五合一終極自動化看板", layout="wide")
-st.title("🌍 全球 AI 與低軌衛星產業鏈【五合一終極全自動看盤系統】")
-st.markdown("本系統全面整合：**操作紀律、全球總經風向、每日盤後籌碼(API全自動)、全球大盤即時監控、跨國關鍵產業鏈估值**。")
+st.set_page_config(page_title="全球 AI & 衛星與台股輪動全自動決策終端", layout="wide")
+st.title("🌍 全球 AI、低軌衛星與台股【板塊輪動追蹤全自動看盤系統】")
+st.markdown("本系統全面整合：**操作紀律、全球總經、每日盤後籌碼、全球大盤、跨國產業鏈估值，並新增『板塊輪動自動統計』功能**。")
 
-# 填入您提供的 FinMind API Token
+# FinMind API Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiZGxzMDQzODY5MjlAZ21haWwuY29tIiwiZW1haWwiOiJkbHMwNDM4NjkyOUBnbWFpbC5jb20iLCJ0b2tlbl92ZXJzaW9uIjowfQ.XLHUQWa0QglCBjukX374bWUWeVaFLfwHhBMrtOrZ-0E"
 
 # 側邊欄控制面板
@@ -22,7 +22,7 @@ refresh_interval = st.sidebar.slider("動態資料重新整理頻率 (秒)", min
 auto_refresh = st.sidebar.checkbox("啟用自動即時刷新", value=True)
 
 # ==============================================================================
-# 一、核心投資操作紀律看板 (手寫心法轉化)
+# 一、核心投資操作紀律看板
 # ==============================================================================
 st.markdown("### 🛑 投資核心操作紀律")
 with st.container():
@@ -39,7 +39,7 @@ with st.container():
 st.markdown("---")
 
 # ==============================================================================
-# 二、全球每日核心關注列表 (總經與週末盤前風向球)
+# 二、全球每日核心關注列表
 # ==============================================================================
 st.markdown("### 🌐 全球每日核心關注列表 (週末與盤前風向球)")
 with st.container():
@@ -60,10 +60,9 @@ with st.container():
 st.markdown("---")
 
 # ==============================================================================
-# 三、自動串接台灣本土財經 API 函數 (籌碼面自動更新與清洗邏輯)
+# 三、自動串接台灣本土財經 API 函數
 # ==============================================================================
 def get_backup_chips_data():
-    """ 容錯備用數據：當 API 異常或假日未開盤時啟動，維持系統正常顯示 """
     backup_buy = [
         {"排名": 1, "族群": "元宇宙", "大戶差 (億)": 360.9, "說明": "歷史基準資料"},
         {"排名": 2, "族群": "5G手機", "大戶差 (億)": 358.9, "說明": "歷史基準資料"},
@@ -80,65 +79,44 @@ def get_backup_chips_data():
     ]
     return pd.DataFrame(backup_buy), pd.DataFrame(backup_sell), "2026-06-15 (歷史基準)"
 
-@st.cache_data(ttl=1800) # 籌碼面資料半小時更新一次即可，避免頻繁呼叫浪費 API 額度
+@st.cache_data(ttl=1800)
 def fetch_tw_chip_data_automated():
     url = "https://api.finmindtrade.com/api/v4/data"
-    
-    # 判斷時間：下午 4 點前看盤，自動抓取前一天的籌碼狀況；4 點後抓當天最新資料
     target_date = datetime.now()
     if target_date.hour < 16:
         target_date = target_date - timedelta(days=1)
-        
     date_str = target_date.strftime("%Y-%m-%d")
     
     parameter = {
         "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
-        "data_id": "", 
-        "start_date": date_str,
-        "end_date": date_str,
-        "token": FINMIND_TOKEN
+        "data_id": "", "start_date": date_str, "end_date": date_str, "token": FINMIND_TOKEN
     }
-    
     try:
         response = requests.get(url, params=parameter, timeout=10)
         data = response.json()
-        
         if data.get("msg") == "success" and len(data.get("data", [])) > 0:
             df = pd.DataFrame(data["data"])
-            
-            # 籌碼清洗：買賣超差額 (買進金額 - 賣出金額) 並換算為億元
             df['買賣超(億)'] = (df['buy'] - df['sell']) / 100000000
-            
-            # 依照族群名稱(name)進行三大法人加總
             df_grouped = df.groupby('name')['買賣超(億)'].sum().reset_index()
             df_grouped.columns = ['族群', '大戶差 (億)']
             
-            # 篩選買超、賣超前 5 名
             df_buy_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=False).head(5).copy()
             df_sell_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=True).head(5).copy()
             
-            # 建立排名
             df_buy_top5['排名'] = range(1, len(df_buy_top5) + 1)
             df_sell_top5['排名'] = range(1, len(df_sell_top5) + 1)
             
-            df_buy_top5 = df_buy_top5[['排名', '族群', '大戶差 (億)']]
-            df_sell_top5 = df_sell_top5[['排名', '族群', '大戶差 (億)']]
-            
-            # 美化數字輸出格式
             df_buy_top5['大戶差 (億)'] = df_buy_top5['大戶差 (億)'].apply(lambda x: f"+{x:.2f} 億")
             df_sell_top5['大戶差 (億)'] = df_sell_top5['大戶差 (億)'].apply(lambda x: f"{x:.2f} 億")
-            
             return df_buy_top5, df_sell_top5, date_str
         else:
             return get_backup_chips_data()
     except:
         return get_backup_chips_data()
 
-# 呼叫自動化籌碼抓取
 df_automated_buy, df_automated_sell, chip_date_info = fetch_tw_chip_data_automated()
 
-# 籌碼面介面呈現
-st.markdown(f"### 🎯 每日盤後大戶資金流向統計 (API 自動即時更新 | 籌碼數據基準日: {chip_date_info})")
+st.markdown(f"### 🎯 每日盤後大戶資金流向統計 (API 全自動即時更新 | 數據基準日: {chip_date_info})")
 col_buy, col_sell = st.columns(2)
 with col_buy:
     st.success("🛒 盤後大戶買超 TOP 5 (資金流入主攻部隊)")
@@ -146,13 +124,10 @@ with col_buy:
 with col_sell:
     st.error("📉 盤後大戶賣超 TOP 5 (資金流出/防範調節)")
     st.dataframe(df_automated_sell, use_container_width=True, hide_index=True)
-
-st.markdown("> 💡 **籌碼焦點筆記：** 資金持續流向電子主流族群，AI、車用電子與被動元件成市場焦點。部分大戶賣超族群出現『股價逆勢上漲』之背離現象時，應嚴守風險纪律，切勿過度追高。")
 st.markdown("---")
 
-
 # ==============================================================================
-# 四、全球大盤、夜盤與個股設定
+# 四、全球大盤與個股代號配置
 # ==============================================================================
 INDEX_CONFIG = {
     '^GSPC': {'name': '美股 S&P 500', 'type': '大盤'},
@@ -165,134 +140,191 @@ INDEX_CONFIG = {
 
 STOCK_CONFIG = {
     '核心晶片與算力': {
-        'NVDA': {'name': 'NVIDIA', 'nation': '美'},
-        'AMD': {'name': 'AMD', 'nation': '美'},
-        '2330.TW': {'name': '台積電', 'nation': '台'},
-        '005930.KS': {'name': '三星電子', 'nation': '韓'}
+        'NVDA': {'name': 'NVIDIA', 'nation': '美'}, 'AMD': {'name': 'AMD', 'nation': '美'},
+        '2330.TW': {'name': '台積電', 'nation': '台'}, '005930.KS': {'name': '三星電子', 'nation': '韓'}
     },
-    '光通訊與基礎建設': {
-        'MRVL': {'name': 'Marvell', 'nation': '美'},
-        '8035.T': {'name': '東京威力科創', 'nation': '日'},
-        '2454.TW': {'name': '聯發科', 'nation': '台'},
+    '被動元件聚落': {
+        '2327.TW': {'name': '國巨', 'nation': '台'}, '2492.TW': {'name': '華新科', 'nation': '台'},
+        '2375.TW': {'name': '凱美', 'nation': '台'}, '3026.TW': {'name': '禾伸堂', 'nation': '台'},
+        '3090.TW': {'name': '日電貿', 'nation': '台'}, '2478.TW': {'name': '大毅', 'nation': '台'},
+        '6173.TW': {'name': '信昌電', 'nation': '台'}, '6449.TW': {'name': '鈺邦', 'nation': '台'},
+        '8042.TW': {'name': '金山電', 'nation': '台'}, '8043.TW': {'name': '蜜望實', 'nation': '台'},
+        '6175.TW': {'name': '立敦', 'nation': '台'}, '3624.TW': {'name': '光頡', 'nation': '台'},
+        '3236.TW': {'name': '千如', 'nation': '台'}, '5328.TW': {'name': '華容', 'nation': '台'},
+        '6155.TW': {'name': '鈞寶', 'nation': '台'}, '8121.TW': {'name': '越峰', 'nation': '台'}
+    },
+    '半導體矽晶圓': {
+        '6488.TW': {'name': '環球晶', 'nation': '台'}, '5483.TW': {'name': '中美晶', 'nation': '台'},
+        '6182.TW': {'name': '合晶', 'nation': '台'}, '3532.TW': {'name': '台勝科', 'nation': '台'},
+        '3016.TW': {'name': '嘉晶', 'nation': '台'}, '2338.TW': {'name': '光罩', 'nation': '台'},
+        '6139.TW': {'name': '亞翔', 'nation': '台'}
+    },
+    '記憶體與IC設計': {
+        '000660.KS': {'name': 'SK 海力士', 'nation': '韓'}, 'MU': {'name': '美光科技', 'nation': '美'},
+        '2344.TW': {'name': '華邦電', 'nation': '台'}, '4973.TW': {'name': '廣穎', 'nation': '台'},
+        '3035.TW': {'name': '智原', 'nation': '台'}, '4919.TW': {'name': '新唐', 'nation': '台'},
+        '2401.TW': {'name': '凌陽', 'nation': '台'}, '8096.TW': {'name': '擎亞', 'nation': '台'}
+    },
+    '光學鏡頭與光通訊': {
+        '3008.TW': {'name': '大立光', 'nation': '台'}, '3406.TW': {'name': '玉晶光', 'nation': '台'},
+        '3362.TW': {'name': '先進光', 'nation': '台'}, '4979.TW': {'name': '華星光', 'nation': '台'},
+        'MRVL': {'name': 'Marvell', 'nation': '美'}, '2454.TW': {'name': '聯發科', 'nation': '台'},
         '4977.TW': {'name': '眾達-KY', 'nation': '台'}
     },
-    '先進封測與記憶體': {
-        '000660.KS': {'name': 'SK 海力士', 'nation': '韓'},
-        '3711.TW': {'name': '日月光投控', 'nation': '台'},
-        '6857.T': {'name': 'Advantest', 'nation': '日'},
-        'MU': {'name': '美光科技', 'nation': '美'}
+    'PCB與電子材料': {
+        '1303.TW': {'name': '南亞', 'nation': '台'}, '1714.TW': {'name': '和桐', 'nation': '台'},
+        '6274.TW': {'name': '台耀', 'nation': '台'}, '6153.TW': {'name': '嘉聯益', 'nation': '台'},
+        '6191.TW': {'name': '精成科', 'nation': '台'}, '2484.TW': {'name': '希華', 'nation': '台'}
     },
     '低軌衛星設備': {
-        'LHX': {'name': 'L3Harris (白沙供應鏈)', 'nation': '美'},
-        '6285.TW': {'name': '啟碁科技', 'nation': '台'},
-        '2314.TW': {'name': '台揚科技', 'nation': '台'},
-        '3491.TW': {'name': '昇達科', 'nation': '台'}
+        'LHX': {'name': 'L3Harris', 'nation': '美'}, '6285.TW': {'name': '啟碁科技', 'nation': '台'},
+        '2314.TW': {'name': '台揚科技', 'nation': '台'}, '3491.TW': {'name': '昇達科', 'nation': '台'}
     }
 }
 
 # ==============================================================================
-# 五、動態即時報價與估值抓取邏輯 (Yahoo Finance)
+# 五、動態數據同步與【輪動大數據量化統計邏輯】
 # ==============================================================================
-@st.cache_data(ttl=10)
-def fetch_financial_dashboard_data():
-    # --- A. 抓取全球大盤/夜盤數據 ---
+@st.cache_data(ttl=15)
+def fetch_and_calculate_rotation_data():
     index_tickers = list(INDEX_CONFIG.keys())
-    idx_data = yf.download(index_tickers, period='2d', interval='1m', progress=False)
-    
-    index_results = []
-    for ticker in index_tickers:
-        try:
-            close_series = idx_data['Close'][ticker].dropna()
-            if not close_series.empty:
-                current_val = close_series.iloc[-1]
-                prev_close = close_series.iloc[0]
-                change_pct = ((current_val - prev_close) / prev_close) * 100
-                index_results.append({
-                    '項目': INDEX_CONFIG[ticker]['name'],
-                    '型態': INDEX_CONFIG[ticker]['type'],
-                    '當前點數': f"{current_val:,.2f}",
-                    '今日漲跌幅': change_pct
-                })
-        except:
-            pass
-
-    # --- B. 抓取個股基本面與動態估值 ---
     all_stock_tickers = []
-    for group, stocks in STOCK_CONFIG.items():
-        all_stock_tickers.extend(stocks.keys())
-        
-    stock_market_data = yf.download(all_stock_tickers, period='1d', interval='1m', progress=False)
+    for s in STOCK_CONFIG.values():
+        all_stock_tickers.extend(s.keys())
+    all_stock_tickers = list(set(all_stock_tickers))
     
-    stock_results = []
-    for group, stocks in STOCK_CONFIG.items():
-        for ticker, info in stocks.items():
-            try:
-                close_series = stock_market_data['Close'][ticker].dropna()
-                open_series = stock_market_data['Open'][ticker].dropna()
-                
-                current_price = close_series.iloc[-1] if not close_series.empty else 0.0
-                open_price = open_series.iloc[0] if not open_series.empty else current_price
-                change_pct = ((current_price - open_price) / open_price) * 100 if open_price != 0 else 0.0
-                
-                t_obj = yf.Ticker(ticker)
-                t_info = t_obj.info
-                
-                forward_pe = t_info.get('forwardPE', None)
-                forward_eps = t_info.get('forwardEps', None)
-                currency = t_info.get('currency', '')
-
-                stock_results.append({
-                    '產業分組': group,
-                    '國家': info['nation'],
-                    '代號': ticker,
-                    '公司名稱': info['name'],
-                    '當前股價': current_price,
-                    '幣別': currency,
-                    '今日漲跌幅': change_pct,
-                    '法人預估本益比 (Forward PE)': forward_pe,
-                    '法人預估明年 EPS': forward_eps
+    # 同步下載全球市場數據
+    idx_data = yf.download(index_tickers, period='2d', interval='1m', progress=False)
+    stock_data = yf.download(all_stock_tickers, period='1d', interval='1m', progress=False)
+    
+    # 處理大盤
+    index_results = []
+    for t in index_tickers:
+        try:
+            close_s = idx_data['Close'][t].dropna()
+            if not close_s.empty:
+                index_results.append({
+                    '項目': INDEX_CONFIG[t]['name'], '型態': INDEX_CONFIG[t]['type'],
+                    '當前點數': f"{close_s.iloc[-1]:,.2f}", '今日漲跌幅': ((close_s.iloc[-1] - close_s.iloc[0]) / close_s.iloc[0]) * 100
                 })
-            except:
-                pass
-                
-    return pd.DataFrame(index_results), pd.DataFrame(stock_results)
+        except: pass
 
-# 執行即時報價同步
-with st.spinner('正在與全球證券交易所同步最新即時行情、期貨與法人估值...'):
-    df_index, df_stocks = fetch_financial_dashboard_data()
+    # 處理個股與族群輪動統計
+    stock_results = []
+    rotation_summary = []
+    
+    for group, stocks in STOCK_CONFIG.items():
+        group_changes = []
+        up_count = 0
+        total_count = 0
+        
+        for t, info in stocks.items():
+            try:
+                close_s = stock_data['Close'][t].dropna()
+                open_s = stock_data['Open'][t].dropna()
+                if not close_s.empty:
+                    curr = close_s.iloc[-1]
+                    op = open_s.iloc[0] if not open_s.empty else curr
+                    pct = ((curr - op) / op) * 100 if op != 0 else 0.0
+                    
+                    group_changes.append(pct)
+                    total_count += 1
+                    if pct > 0: up_count += 1
+                    
+                    # 獲取法人財務數據
+                    t_obj = yf.Ticker(t)
+                    t_info = t_obj.info
+                    
+                    stock_results.append({
+                        '產業分組': group, '國家': info['nation'], '代號': t, '公司名稱': info['name'],
+                        '當前股價': curr, '幣別': t_info.get('currency', ''), '今日漲跌幅': pct,
+                        '法人預估本益比 (Forward PE)': t_info.get('forwardPE', None), '法人預估明年 EPS': t_info.get('forwardEps', None)
+                    })
+            except: pass
+            
+        # 計算群組平均指標 (即時輪動核心)
+        if group_changes:
+            avg_pct = sum(group_changes) / len(group_changes)
+            up_ratio = (up_count / total_count) * 100 if total_count > 0 else 0
+            rotation_summary.append({
+                '族群': group,
+                '平均漲跌幅': avg_pct,
+                '上漲家數比': f"{up_count}/{total_count} ({up_ratio:.0f}%)"
+            })
+            
+    return pd.DataFrame(index_results), pd.DataFrame(stock_results), pd.DataFrame(rotation_summary)
+
+# 執行同步運算
+with st.spinner('正在計算台股各大強勢板塊即時資金輪動動向...'):
+    df_index, df_stocks, df_rotation = fetch_and_calculate_rotation_data()
 
 # ==============================================================================
-# 六、全球大盤與個股分頁呈現
+# 六、【新亮點呈現】今日台股資金輪動強弱榜 (直接顯示在最上層面板)
+# ==============================================================================
+st.markdown("### 🔥 今日台股主流資金輪動強弱榜 (即時量化統計)")
+if not df_rotation.empty:
+    # 按照平均漲跌幅排序，抓出多頭與空頭領頭羊
+    df_rotation_sorted = df_rotation.sort_values(by='平均漲跌幅', ascending=False)
+    
+    col_lead1, col_lead2, col_lead3 = st.columns(3)
+    with col_lead1:
+        st.metric(
+            label=f"🥇 今日多頭總司令：{df_rotation_sorted.iloc[0]['族群']}",
+            value=f"{df_rotation_sorted.iloc[0]['平均漲跌幅']:+.2f}%",
+            delta=f"上漲比例 {df_rotation_sorted.iloc[0]['上漲家數比']}"
+        )
+    with col_lead2:
+        st.metric(
+            label=f"🥈 次強主流板塊：{df_rotation_sorted.iloc[1]['族群']}",
+            value=f"{df_rotation_sorted.iloc[1]['平均漲跌幅']:+.2f}%",
+            delta=f"上漲比例 {df_rotation_sorted.iloc[1]['上漲家數比']}"
+        )
+    with col_lead3:
+        # 顯示最後一名，防範弱勢族群
+        st.metric(
+            label=f"⚠️ 今日相對弱勢族群：{df_rotation_sorted.iloc[-1]['族群']}",
+            value=f"{df_rotation_sorted.iloc[-1]['平均漲跌幅']:+.2f}%",
+            delta=f"上漲比例 {df_rotation_sorted.iloc[-1]['上漲家數比']}",
+            delta_color="inverse"
+        )
+        
+    # 繪製產業輪動橫向直觀長條圖
+    fig_rot = go.Figure(go.Bar(
+        y=df_rotation_sorted['族群'],
+        x=df_rotation_sorted['平均漲跌幅'],
+        orientation='h',
+        marker_color=['#00f574' if x >= 0 else '#ff4b4b' for x in df_rotation_sorted['平均漲跌幅']]
+    ))
+    fig_rot.update_layout(
+        xaxis_title="族群平均漲跌幅 (%)", yaxis_title="關注產業聚落",
+        height=280, margin=dict(l=20, r=20, t=10, b=10)
+    )
+    st.plotly_chart(fig_rot, use_container_width=True, key="industry_rotation_chart")
+else:
+    st.warning("暫時無法取得輪動統計數據。")
+
+st.markdown("---")
+
+# ==============================================================================
+# 七、全球主要大盤與個股分頁呈現
 # ==============================================================================
 st.markdown("### 📊 全球主要大盤 & 台指夜盤即時監控")
 if not df_index.empty:
     cols = st.columns(len(df_index))
     for idx, row in df_index.iterrows():
         with cols[idx]:
-            delta_str = f"{row['今日漲跌幅']:+.2f}%"
-            st.metric(
-                label=f"{row['型態']} | {row['項目']}", 
-                value=row['當前點數'], 
-                delta=delta_str
-            )
-else:
-    st.warning("暫時無法取得指數資料。")
-
+            st.metric(label=f"{row['型態']} | {row['項目']}", value=row['當前點數'], delta=f"{row['今日漲跌幅']:+.2f}%")
 st.markdown("---")
 
-st.markdown(f"### 🚀 AI & 低軌衛星全球產業鏈觀測站 (系統刷新時間: {datetime.now().strftime('%H:%M:%S')})")
-
+st.markdown(f"### 🚀 全球 AI & 低軌衛星暨台股強勢板塊鏈觀測站 (系統刷新時間: {datetime.now().strftime('%H:%M:%S')})")
 if not df_stocks.empty:
     categories = list(STOCK_CONFIG.keys())
     tabs = st.tabs(categories)
-    
     for i, cat in enumerate(categories):
         with tabs[i]:
-            st.markdown(f"#### 🎯 核心聚落：{cat}")
-            
+            st.markdown(f"#### 🎯 當前關注群組：{cat}")
             df_sub = df_stocks[df_stocks['產業分組'] == cat].copy()
             
-            # 建立獨立的前台展示表（數據隔離，防止 Plotly 繪圖報錯）
             df_display = df_sub.copy()
             df_display['當前股價'] = df_display.apply(lambda r: f"{r['當前股價']:,.2f} {r['幣別']}" if r['當前股價'] > 0 else "未開盤", axis=1)
             df_display['今日漲跌幅'] = df_display['今日漲跌幅'].apply(lambda x: f"{x:+.2f}%")
@@ -302,24 +334,15 @@ if not df_stocks.empty:
             df_display = df_display.drop(columns=['產業分組', '幣別'])
             st.dataframe(df_display, use_container_width=True, hide_index=True)
             
-            # 繪圖：直接使用純數字型態的 df_sub 序列
             fig = go.Figure(go.Bar(
-                x=df_sub['公司名稱'] + " (" + df_sub['國家'] + ")",
-                y=df_sub['今日漲跌幅'],
+                x=df_sub['公司名稱'] + " (" + df_sub['國家'] + ")", y=df_sub['今日漲跌幅'],
                 marker_color=['#ff4b4b' if x < 0 else '#00f574' for x in df_sub['今日漲跌幅']]
             ))
-            fig.update_layout(
-                yaxis_title="今日漲跌幅 (%)",
-                xaxis_title="龍頭企業",
-                height=300,
-                margin=dict(l=20, r=20, t=15, b=15)
-            )
-            st.plotly_chart(fig, use_container_width=True, key=f"chart_final_group_{i}")
-else:
-    st.info("尚無個股與估值資料。")
+            fig.update_layout(yaxis_title="今日漲跌幅 (%)", xaxis_title="企業成員", height=280, margin=dict(l=20, r=20, t=15, b=15))
+            st.plotly_chart(fig, use_container_width=True, key=f"chart_rot_group_{i}")
 
 # ==============================================================================
-# 七、網頁定時自動循環刷新機制
+# 八、網頁定時自動循環刷新機制
 # ==============================================================================
 if auto_refresh:
     time.sleep(refresh_interval)
