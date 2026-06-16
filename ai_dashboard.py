@@ -629,9 +629,25 @@ def get_electronics_stocks():
     url = "https://api.finmindtrade.com/api/v4/data"
     params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
     res = requests.get(url, params=params).json()
+    
+    if 'data' not in res or not res['data']:
+        st.error("無法取得股票資訊，請檢查 API Token 或網路連線")
+        return []
+    
     df_info = pd.DataFrame(res['data'])
-    # 篩選電子相關產業
-    electronics = df_info[df_info['industry'].str.contains('半導體|電子|電腦|通訊', na=False)]
+    
+    # --- 除錯與自動匹配機制 ---
+    # 我們嘗試搜尋包含 'industry' 或 '產業' 字樣的欄位名稱
+    potential_cols = [c for c in df_info.columns if 'industry' in c.lower() or '產業' in c]
+    
+    if not potential_cols:
+        st.error(f"找不到產業欄位！API 回傳的欄位有：{df_info.columns.tolist()}")
+        return []
+    
+    target_col = potential_cols[0] # 自動選擇第一個符合的欄位
+    
+    # 執行篩選
+    electronics = df_info[df_info[target_col].str.contains('半導體|電子|電腦|通訊', na=False)]
     return electronics['stock_id'].unique().tolist()
 
 # 2. 核心邏輯：四指標運算 (模擬 API 串接邏輯)
