@@ -611,59 +611,66 @@ st.sidebar.warning(
 # ==============================================================================
 # 十一、新增：量化選股與真實數據擷取引擎
 # ==============================================================================
+import streamlit as st
+import pandas as pd
+import requests
+from datetime import datetime, timedelta
+
+# ==============================================================================
+# 量化選股核心引擎 (正確掛接 FinMind 真實數據)
+# ==============================================================================
+
+@st.cache_data(ttl=3600)
+def fetch_finmind_data(dataset, stock_id):
+    """通用 API 請求函式"""
+    url = "https://api.finmindtrade.com/api/v4/data"
+    params = {"dataset": dataset, "data_id": stock_id, "token": FINMIND_TOKEN}
+    try:
+        res = requests.get(url, params=params, timeout=5).json()
+        if res.get("data"):
+            return pd.DataFrame(res["data"])
+    except:
+        return pd.DataFrame()
+    return pd.DataFrame()
 
 def get_real_metrics(stock_id):
-    """
-    動態取得真實指標數據：連結 FinMind API
-    """
-    url = "https://api.finmindtrade.com/api/v4/data"
-    
-    # 以『財報數據』為例，若您要抓籌碼，請改為 'TaiwanStockShareholding'
-    params = {
-        "dataset": "TaiwanStockFinancialStatement", 
-        "data_id": stock_id,
-        "token": FINMIND_TOKEN,
-        "start_date": (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
+    """計算真實指標數值"""
+    # 1. 大戶指標: TaiwanStockShareholding (big_shareholder_ratio)
+    df_share = fetch_finmind_data("TaiwanStockShareholding", stock_id)
+    big_inc = 0
+    if not df_share.empty and len(df_share) >= 2:
+        big_inc = float(df_share['big_shareholder_ratio'].iloc[-1]) - float(df_share['big_shareholder_ratio'].iloc[-2])
+
+    # 2. 財報指標: TaiwanStockFinancialStatement (R&D_expense, contract_liability)
+    df_fin = fetch_finmind_data("TaiwanStockFinancialStatement", stock_id)
+    rd_inc = 0
+    con_liab_inc = 0
+    if not df_fin.empty:
+        # 需篩選特定季報欄位，此處範例為簡化邏輯
+        # 實務上請先用 st.write(df_fin.columns) 查看該股財報欄位名稱
+        pass 
+
+    # 3. 營收指標: TaiwanStockMonthlyRevenue
+    df_rev = fetch_finmind_data("TaiwanStockMonthlyRevenue", stock_id)
+    rev_growth = 0
+    if not df_rev.empty and len(df_rev) >= 2:
+        rev_growth = float(df_rev['revenue_month_growth_rate'].iloc[-1])
+
+    return {
+        "大戶增": round(big_inc, 2),
+        "研發增": "檢查欄位", 
+        "合約負債增": "檢查欄位",
+        "月營收雙增": round(rev_growth, 2)
     }
-    
 
-# 修改後的除錯偵測範例
-response = requests.get(url, params=params, timeout=5).json()
-if response.get("data"):
-    df = pd.DataFrame(response["data"])
-    st.write(f"股票 {stock_id} 的實際欄位清單:", df.columns.tolist()) # 【關鍵除錯】
-        
-        if len(data) >= 2:
-            df = pd.DataFrame(data)
-            # 確保欄位名稱正確 (建議先用 st.write(df.columns) 確認)
-            # 這裡假設該 dataset 中有 'value' 欄位
-            val1 = float(df['value'].iloc[-1]) 
-            val2 = float(df['value'].iloc[-2])
-            
-            return {
-                "大戶增": round(val1 - val2, 2),
-                "研發增": round((val1 / val2) - 1, 4) * 100,
-                "合約負債增": round(val1 * 0.01, 2),
-                "月營收雙增": round(val2 * 0.02, 2)
-            }
-        else:
-            return {"大戶增": 0, "研發增": 0, "合約負債增": 0, "月營收雙增": 0}
-    except:
-        return {"大戶增": 0, "研發增": 0, "合約負債增": 0, "月營收雙增": 0}
-
-# 執行選股篩選並顯示
-st.markdown("### 📈 電子股量化選股監控")
-# 這裡使用您代碼中定義的股票池
-electronics_pool = ["2330", "2317", "2454", "2303", "2308", "2382", "2357"] 
-data_list = []
-
-for sid in electronics_pool:
-    metrics = get_real_metrics(sid)
-    data_list.append({"股票代號": sid, **metrics})
+# ==============================================================================
+# UI 顯示區塊
+# ==============================================================================
+st.markdown("### 🔍 真實量化選股監控")
+target_stocks = ["2330", "2317", "2454", "2303"] # 可擴充
+data_list = [ {"股票代號": sid, **get_real_metrics(sid)} for sid in target_stocks ]
 
 df_quant = pd.DataFrame(data_list)
-
-# 顯示表格
 st.dataframe(df_quant, use_container_width=True)
 # ==============================================================================
 # 十二、網頁定時自動循環刷新機制
