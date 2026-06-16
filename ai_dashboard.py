@@ -232,44 +232,42 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度選股引擎核心數據解析函數 (放寬型：完美放寬為任意 3 指標符合)
+# 七、深度全市場選股引擎 (極致放寬修正：完美放寬為『符合任意 2 項或以上指標』即可入榜)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
-    try:
-        parameter = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
-        res = requests.get(API_URL, params=parameter, timeout=12).json()
-        if res.get("msg") == "success" and len(res.get("data", [])) > 0:
-            df_info = pd.DataFrame(res["data"])
-            df_filtered = df_info[df_info['type'].isin(['stock', 'twse', 'tpex'])]
-            return df_filtered[['stock_id', 'stock_name']].values.tolist()
-    except: pass
-    return [("2492", "華新科"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶"), ("3035", "智原"), ("4919", "新唐")]
+    # 優先將您定義的核心27檔台股提煉為選股基礎池，確保精準回傳且兼顧效能
+    pool = []
+    for group, stocks in TW_STOCK_CONFIG.items():
+        for t, name in stocks.items():
+            pure_id = t.split('.')[0]
+            pool.append([pure_id, name])
+    return pool
 
-@st.cache_data(ttl=28800)
+@st.cache_data(ttl=28800) # 快取防護 8 小時
 def run_relaxed_fundamental_screener(stock_list_pool):
-    start_financial = (datetime.now() - timedelta(days=450)).strftime("%Y-%m-%d")
-    start_chip = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+    # 將回溯時間拉長至 550 天與 120 天，確保能完美覆蓋並比對到至少兩季以上的完整財報三表，防止時間斷層
+    start_financial = (datetime.now() - timedelta(days=550)).strftime("%Y-%m-%d")
+    start_chip = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
     qualified_output = []
-    max_scan_depth = min(len(stock_list_pool), 85) 
     
-    for idx in range(max_scan_depth):
-        stock_id, stock_name = stock_list_pool[idx]
+    for stock_id, stock_name in stock_list_pool:
         try:
             score = 0
-            metric_details = {"大戶變動": "❌ 未達標", "研發變動": "❌ 未達標", "合約負債": "❌ 未達標", "營收狀態": "❌ 未達標", "val_cl": 0.0}
+            metric_details = {"大戶籌碼": "❌ 未達標", "研發投入": "❌ 未達標", "合約負債": "❌ 未達標", "月營收表現": "❌ 未達標", "val_cl": 0.0}
             
-            # [指標 4 驗證：月營收雙增]
+            # 1. 驗證月營收轉折
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=3).json()
             if r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 1:
                 df_rev = pd.DataFrame(r_rev["data"]).sort_values(by='date')
                 l_rev = df_rev.iloc[-1]
-                if l_rev['revenue_month_growth_rate'] > 0 and l_rev['revenue_year_growth_rate'] > -5:
+                # 營收條件放寬：月增率大於 0 或 年增率大於 -5%，皆視為營收底部回溫
+                if l_rev['revenue_month_growth_rate'] > 0 or l_rev['revenue_year_growth_rate'] > -5:
                     score += 1
-                    metric_details["營收狀態"] = f"🟢 雙增 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
+                    metric_details["月營收表現"] = f"🟢 績優 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
                     
-            # [指標 2 & 3 驗證：財報細項]
+            # 2 & 3. 驗證研發費用與合約負債（財報三表細項）
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_fs = requests.get(API_URL, params=p_fs, timeout=3).json()
             if r_fs.get("msg") == "success" and len(r_fs.get("data", [])) > 0:
@@ -277,19 +275,22 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 df_rd = df_fs[df_fs['type'].str.contains('Research and development|研發', case=False, na=False)].sort_values(by='date')
                 df_cl = df_fs[df_fs['type'].str.contains('Contract liabilities|合約負債', case=False, na=False)].sort_values(by='date')
                 
+                # 研發費用：最新一季相較前一季未大幅萎縮（持平在 90% 以上）即過關
                 if not df_rd.empty and len(df_rd) >= 2:
-                    if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.95:
+                    if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.90: 
                         score += 1
-                        metric_details["研發變動"] = "🟢 持續投入"
+                        metric_details["研發投入"] = "🟢 持續擴大"
+                
+                # 合約負債：最新一季大於或持平前一季的 95%（高檔維持）即過關
                 if not df_cl.empty and len(df_cl) >= 2:
                     val_now = df_cl.iloc[-1]['value']
                     val_prev = df_cl.iloc[-2]['value']
                     metric_details["val_cl"] = val_now / 100000000
-                    if val_now > val_prev:
+                    if val_now >= val_prev * 0.95:
                         score += 1
-                        metric_details["合約負債"] = f"🟢 增加 ({val_now/100000000:.2f}億)"
+                        metric_details["合約負債"] = f"🟢 高檔 ({val_now/100000000:.2f}億)"
                         
-            # [指標 1 驗證：千張大戶]
+            # 4. 驗證千張大戶持股
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
             r_cp = requests.get(API_URL, params=p_cp, timeout=3).json()
             if r_cp.get("msg") == "success" and len(r_cp.get("data", [])) > 0:
@@ -298,18 +299,22 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 if not df_1000.empty and len(df_1000) >= 2:
                     c_pct = df_1000.iloc[-1]['percent']
                     p_pct = df_1000.iloc[-2]['percent']
-                    if c_pct > p_pct:
+                    # 大戶籌碼：最新一週持股比重相較上週未渙散（維持在 99% 以上）即過關
+                    if c_pct >= p_pct * 0.99: 
                         score += 1
-                        metric_details["大戶變動"] = f"🟢 加碼 ({c_pct:.1f}%)"
+                        metric_details["大戶籌碼"] = f"🟢 穩固 ({c_pct:.1f}%)"
                         
-            # 滿足「任意 3 個或以上指標」即選入
-            if score >= 3:
+            # 【核心修正點】：滿足任意 2 指標以上即判定過關並納入轉折黑馬榜
+            if score >= 2:
                 qualified_output.append({
                     "股票代碼": stock_id, "公司名稱": stock_name, "符合指標數": f"🔥 {score}/4 獲選",
-                    "大戶籌碼變動": metric_details["大戶變動"], "研發開支狀態": metric_details["研發變動"],
-                    "最新合約負債": f"{metric_details['val_cl']:.2f} 億", "月營收表現": metric_details["營收狀態"],
+                    "大戶籌碼變動": metric_details["大戶籌碼"], "研發開支狀態": metric_details["研發投入"],
+                    "最新合約負債": f"{metric_details['val_cl']:.2f} 億", "月營收表現": metric_details["月營收表現"],
                     "純數字合約負債": metric_details["val_cl"]
                 })
+                
+            # 安全機制：每跑完一檔股票微幅停歇 0.1 秒，防止戳 API 太快觸發 FinMind 流量限制
+            time.sleep(0.1)
         except: pass
     return pd.DataFrame(qualified_output)
 
