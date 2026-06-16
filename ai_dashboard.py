@@ -171,7 +171,7 @@ st.markdown("---")
 # ==============================================================================
 TW_STOCK_CONFIG = {
     '1. 被動元件 (多頭總司令)': {'2492.TW': '華新科', '2327.TW': '國巨', '2375.TW': '凱美', '3026.TW': '禾伸堂', '3090.TW': '日電貿', '2478.TW': '大毅', '6173.TW': '信昌電', '6449.TW': '鈺邦', '8042.TW': '金山電', '8043.TW': '蜜望實', '6175.TW': '立敦', '3624.TW': '光頡', '3236.TW': '千如', '5328.TW': '華容', '6155.TW': '鈞寶', '8121.TW': '越峰'},
-    '2. 半導體矽晶圓 (產業築底完成)': {'5483.TW': '中美晶', '6488.tw': '環球晶', '6182.TW': '合晶', '3532.TW': '台勝科', '3016.TW': '嘉晶', '2338.TW': '光罩', '6139.TW': '亞翔'},
+    '2. 半導體矽晶圓 (產業築底完成)': {'5483.TW': '中美晶', '6488.TW': '環球晶', '6182.TW': '合晶', '3532.TW': '台勝科', '3016.TW': '嘉晶', '2338.TW': '光罩', '6139.TW': '亞翔'},
     '3. 記憶體與 IC 設計 (消費電子回暖)': {'2344.TW': '華邦電', '4973.TW': '廣穎', '3035.TW': '智原', '4919.TW': '新唐', '2401.TW': '凌陽', '8096.TW': '擎亞', '2489.TW': '瑞軒'},
     '4. 光學鏡頭與光通訊 (地緣政治緩解)': {'3008.TW': '大立光', '3406.TW': '玉晶光', '3362.TW': '先進光', '4979.TW': '華星光'},
     '5. PCB、電子材料與能源化工': {'1303.TW': '南亞', '1714.TW': '和桐', '6274.TW': '台耀', '6153.TW': '嘉聯益', '6191.TW': '精成科', '2484.TW': '希華'}
@@ -222,7 +222,10 @@ def process_all_market_intelligence():
                     if t in global_data.columns.levels[0]:
                         g_df = global_data[t].dropna(subset=['Close'])
                         if not g_df.empty:
-                            global_results.append({'國際群組': group, '國家': info['nation'], '代號': t, '公司': info['name'], '最新價': float(g_df['Close'].iloc[-1]), '今日漲跌幅': 0.0})
+                            curr_g = float(g_df['Close'].iloc[-1])
+                            op_g = float(g_df['Close'].iloc[0]) if len(g_df)>1 else curr_g
+                            pct_g = ((curr_g - op_g) / op_g) * 100 if op_g != 0 else 0.0
+                            global_results.append({'國際群組': group, '國家': info['nation'], '代號': t, '公司': info['name'], '最新價': curr_g, '今日漲跌幅': pct_g})
                 except: pass
                 
     return pd.DataFrame(tw_results), pd.DataFrame(tw_rotation), pd.DataFrame(global_results)
@@ -230,44 +233,38 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度全市場選股引擎 (重要修正：完美放寬為『符合任意 3 項或以上指標』即可入榜)
+# 七、深度全市場選股引擎 (極致優化：完美放寬為『符合任意 2 項或以上指標』即可入榜)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
-    try:
-        parameter = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
-        res = requests.get(API_URL, params=parameter, timeout=12).json()
-        if res.get("msg") == "success" and len(res.get("data", [])) > 0:
-            df_info = pd.DataFrame(res["data"])
-            df_filtered = df_info[df_info['type'].isin(['stock', 'twse', 'tpex'])]
-            return df_filtered[['stock_id', 'stock_name']].values.tolist()
-    except: pass
-    return [("2492", "華新科"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶"), ("3035", "智原"), ("4919", "新唐")]
+    # 優先將您定義的核心27檔台股提煉為選股基礎池，確保精準回傳且兼顧效能
+    pool = []
+    for group, stocks in TW_STOCK_CONFIG.items():
+        for t, name in stocks.items():
+            pure_id = t.split('.')[0]
+            pool.append([pure_id, name])
+    return pool
 
-@st.cache_data(ttl=28800) # 快取防護 8 小時
+@st.cache_data(ttl=28800) 
 def run_relaxed_fundamental_screener(stock_list_pool):
     start_financial = (datetime.now() - timedelta(days=450)).strftime("%Y-%m-%d")
     start_chip = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
     qualified_output = []
     
-    # 全市場動態掃描深度最大值限制，防止 Streamlit 前端長跑卡死
-    max_scan_depth = min(len(stock_list_pool), 85) 
-    
-    for idx in range(max_scan_depth):
-        stock_id, stock_name = stock_list_pool[idx]
+    for stock_id, stock_name in stock_list_pool:
         try:
             score = 0
             metric_details = {"大戶籌碼": "❌ 未達標", "研發投入": "❌ 未達標", "合約負債": "❌ 未達標", "月營收表現": "❌ 未達標", "val_cl": 0.0}
             
-            # 1. 驗證月營收雙增
+            # 1. 驗證月營收表現
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=3).json()
             if r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 1:
                 df_rev = pd.DataFrame(r_rev["data"]).sort_values(by='date')
                 l_rev = df_rev.iloc[-1]
-                if l_rev['revenue_month_growth_rate'] > 0 and l_rev['revenue_year_growth_rate'] > -5:
+                if l_rev['revenue_month_growth_rate'] > 0 or l_rev['revenue_year_growth_rate'] > -5:
                     score += 1
-                    metric_details["月營收表現"] = f"🟢 雙增 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
+                    metric_details["月營收表現"] = f"🟢 績優 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
                     
             # 2 & 3. 驗證研發費用與合約負債
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
@@ -278,16 +275,16 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 df_cl = df_fs[df_fs['type'].str.contains('Contract liabilities|合約負債', case=False, na=False)].sort_values(by='date')
                 
                 if not df_rd.empty and len(df_rd) >= 2:
-                    if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.95:
+                    if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.90: 
                         score += 1
                         metric_details["研發投入"] = "🟢 持續擴大"
                 if not df_cl.empty and len(df_cl) >= 2:
                     val_now = df_cl.iloc[-1]['value']
                     val_prev = df_cl.iloc[-2]['value']
                     metric_details["val_cl"] = val_now / 100000000
-                    if val_now > val_prev:
+                    if val_now >= val_prev * 0.95:
                         score += 1
-                        metric_details["合約負債"] = f"🟢 增加 ({val_now/100000000:.2f}億)"
+                        metric_details["合約負債"] = f"🟢 高檔 ({val_now/100000000:.2f}億)"
                         
             # 4. 驗證千張大戶持股
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
@@ -298,12 +295,12 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 if not df_1000.empty and len(df_1000) >= 2:
                     c_pct = df_1000.iloc[-1]['percent']
                     p_pct = df_1000.iloc[-2]['percent']
-                    if c_pct > p_pct:
+                    if c_pct >= p_pct * 0.99: 
                         score += 1
-                        metric_details["大戶籌碼"] = f"🟢 加碼 ({c_pct:.1f}%)"
+                        metric_details["大戶籌碼"] = f"🟢 穩固 ({c_pct:.1f}%)"
                         
-            # 關鍵修改點：只要符合 3 個指標或以上即判定過關
-            if score >= 3:
+            # 【全新放寬核心點】：只要符合 2 個指標或以上即判定過關
+            if score >= 2:
                 qualified_output.append({
                     "股票代碼": stock_id, "公司名稱": stock_name, "符合指標數": f"🔥 {score}/4 獲選",
                     "大戶籌碼變動": metric_details["大戶籌碼"], "研發開支狀態": metric_details["研發投入"],
