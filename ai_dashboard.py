@@ -607,63 +607,60 @@ st.sidebar.markdown("---")
 # 十一、新增：量化選股與真實數據擷取引擎
 # ==============================================================================
 # ==============================================================================
-# 十二、2330.TW 深度基本面與籌碼監測引擎 (FinMind API 串接)
+# 十二、2330.TW 深度基本面與籌碼監測引擎 (優化版)
 # ==============================================================================
-st.markdown("### 💎 2330 台積電深度基本面與籌碼監測")
+st.markdown("### 💎 2330 台積電深度基本面與籌碼監測 (除錯優化版)")
 
 @st.cache_data(ttl=3600)
-def fetch_2330_deep_data():
+def fetch_2330_debug_data():
     url = "https://api.finmindtrade.com/api/v4/data"
-    stock_id = "2330"
+    params = {"stock_id": "2330", "token": FINMIND_TOKEN}
     
-    # 1. 月營收
-    res_rev = requests.get(url, params={"dataset": "TaiwanStockMonthlyRevenue", "stock_id": stock_id, "token": FINMIND_TOKEN}).json()
-    df_rev = pd.DataFrame(res_rev.get("data", []))
-    
-    # 2. 財報 (研發費用 + 合約負債)
-    res_fin = requests.get(url, params={"dataset": "TaiwanStockFinancialStatements", "stock_id": stock_id, "token": FINMIND_TOKEN}).json()
+    # 抓取財報
+    res_fin = requests.get(url, params={**params, "dataset": "TaiwanStockFinancialStatements"}).json()
     df_fin = pd.DataFrame(res_fin.get("data", []))
     
-    # 3. 大戶持股 (集保戶股權分散)
-    res_chip = requests.get(url, params={"dataset": "TaiwanStockHoldingSharesPer", "stock_id": stock_id, "token": FINMIND_TOKEN}).json()
+    # 抓取月營收
+    res_rev = requests.get(url, params={**params, "dataset": "TaiwanStockMonthlyRevenue"}).json()
+    df_rev = pd.DataFrame(res_rev.get("data", []))
+    
+    # 抓取集保股權 (大戶)
+    res_chip = requests.get(url, params={**params, "dataset": "TaiwanStockHoldingSharesPer"}).json()
     df_chip = pd.DataFrame(res_chip.get("data", []))
     
     return df_rev, df_fin, df_chip
 
-# 執行抓取
-df_rev, df_fin, df_chip = fetch_2330_deep_data()
+df_rev, df_fin, df_chip = fetch_2330_debug_data()
 
-# 資料處理與呈現
-col_f1, col_f2 = st.columns(2)
-
-with col_f1:
-    st.subheader("📈 營收與研發增長")
-    if not df_rev.empty:
-        # 顯示最新月營收年增率
-        latest_rev = df_rev.iloc[-1]
-        st.metric("最新月營收 (億)", f"{latest_rev['value']/100000000:.2f}", delta=f"{latest_rev.get('revenue_month_year_growth_rate', 0):.2f}%")
+# 顯示除錯用資訊，確認資料是否存在
+if df_fin.empty:
+    st.error("財報資料為空，請檢查 API 回傳狀態。")
+else:
+    # 這裡顯示所有可能的帳目名稱，幫您找出正確的對應字串
+    st.write("系統偵測到的財報帳目項目：", df_fin['type'].unique().tolist())
     
-    if not df_fin.empty:
-        # 篩選研發費用 (這裡需根據實際 API 回傳的欄位名稱調整)
-        research_exp = df_fin[df_fin['type'] == '研究發展費用'].tail(1)
-        st.write("最新季度研發費用 (單位:元):", research_exp['value'].values[0] if not research_exp.empty else "N/A")
+    # 針對您需求的項目進行提取 (若名稱不同，請根據上方印出的清單修正以下字串)
+    # 常見名稱為：研究發展費用、合約負債-流動 等
+    target_research = df_fin[df_fin['type'].str.contains('研究發展費用', na=False)].tail(1)
+    target_contract = df_fin[df_fin['type'].str.contains('合約負債', na=False)].tail(1)
+    
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        st.subheader("研發費用")
+        st.write(target_research[['date', 'type', 'value']] if not target_research.empty else "未找到項目")
+    with col_d2:
+        st.subheader("合約負債")
+        st.write(target_contract[['date', 'type', 'value']] if not target_contract.empty else "未找到項目")
 
-with col_f2:
-    st.subheader("🛡️ 合約負債與大戶籌碼")
-    if not df_fin.empty:
-        # 篩選合約負債
-        contract_liab = df_fin[df_fin['type'] == '合約負債'].tail(1)
-        st.write("最新季度合約負債:", contract_liab['value'].values[0] if not contract_liab.empty else "N/A")
-        
-    if not df_chip.empty:
-        # 計算 1000 張以上大戶比例變化
-        big_holders = df_chip[df_chip['holding_shares_level'] == '1000以上'].tail(2)
-        if len(big_holders) >= 2:
-            pct_change = big_holders['percent'].diff().iloc[-1]
-            st.metric("1000張以上大戶持股比例變化", f"{pct_change:+.2f}%", delta_color="normal")
+if not df_rev.empty:
+    st.subheader("近期月營收數據")
+    st.dataframe(df_rev.tail(5), use_container_width=True)
 
-st.info("💡 提示：以上數據由 FinMind API 定時更新。若顯示 N/A，請確認 API 欄位對照是否正確。")
-st.markdown("---")
+if not df_chip.empty:
+    st.subheader("大戶持股比例 (1000張以上)")
+    # 篩選 1000 張以上級距
+    df_big = df_chip[df_chip['holding_shares_level'] == '1000以上']
+    st.line_chart(df_big.tail(20).set_index('date')['percent'])
 # ==============================================================================
 # 十二、網頁定時自動循環刷新機制
 # ==============================================================================
