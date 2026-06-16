@@ -5,17 +5,90 @@ from datetime import datetime
 import time
 import plotly.graph_objects as go
 
-# 1. 網頁基本配置
-st.set_page_config(page_title="全球 AI & 衛星產業鏈即時看板", layout="wide")
-st.title("🌍 全球 AI 與低軌衛星產業鏈動態估值儀表板")
-st.markdown("本系統即時監控全球核心指數、夜盤期貨，並針對 AI 與衛星通訊四大關鍵產業鏈進行法人估值（PE/EPS）交叉比對。")
+# ==============================================================================
+# 1. 網頁基礎配置
+# ==============================================================================
+st.set_page_config(page_title="全球 AI & 衛星產業鏈五合一終極看板", layout="wide")
+st.title("🌍 全球 AI 與低軌衛星產業鏈【五合一終極動態看盤系統】")
+st.markdown("本系統全面整合：**操作紀律、全球總經風向、每日盤後籌碼、全球大盤即時監控、跨國關鍵產業鏈估值**。")
 
-# 2. 側邊欄控制面板
-st.sidebar.header("🔄 系統控制")
-refresh_interval = st.sidebar.slider("自動重新整理頻率 (秒)", min_value=10, max_value=120, value=30)
+# 側邊欄控制面板
+st.sidebar.header("🔄 系統主控制")
+refresh_interval = st.sidebar.slider("動態資料重新整理頻率 (秒)", min_value=10, max_value=120, value=30)
 auto_refresh = st.sidebar.checkbox("啟用自動即時刷新", value=True)
 
-# 3. 定義大盤與夜盤指數配置
+# ==============================================================================
+# 一、核心投資操作紀律看板 (手寫心法轉化)
+# ==============================================================================
+st.markdown("### 🛑 投資核心操作紀律")
+with st.container():
+    col_law1, col_law2, col_law3, col_law4 = st.columns(4)
+    with col_law1:
+        st.info("📊 **1. 不預測市場**\n\n🛡️ **2. 分散投資**")
+    with col_law2:
+        st.warning("⚠️ **3. 控制風險**\n\n⏳ **4. 長期持有**")
+    with col_law3:
+        st.success("📚 **5. 持續學習**\n\n🎯 **6. 堅守紀律**")
+    with col_law4:
+        st.error("🔇 **7. 忽略噪音**\n\n💰 **8. 先存緊急準備金**")
+
+st.markdown("---")
+
+# ==============================================================================
+# 二、全球每日核心關注列表 (總經與週末盤前風向球)
+# ==============================================================================
+st.markdown("### 🌐 全球每日核心關注列表 (週末與盤前風向球)")
+with st.container():
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        st.metric(label="🇺🇸 週末美國科技股 100", value="29,827.7", delta="+0.53%")
+        st.metric(label="🇺🇸 Weekend Wall Street Cash", value="51,355.2", delta="+0.35%")
+    with col_m2:
+        st.metric(label="🇪🇺 Weekend Germany 40 Cash", value="24,756.9", delta="+0.40%")
+        st.metric(label="🇬🇧 週末英國富時 100", value="10,497.3", delta="+0.34%")
+    with col_m3:
+        st.metric(label="🇭🇰 週末香港 HS50 現貨", value="24,752.9", delta="+0.28%")
+        st.metric(label="🇦🇺 週末澳洲 200", value="8,860.2", delta="+0.19%")
+    with col_m4:
+        st.metric(label="🛢️ 週末美國原油 現貨", value="8,070.6", delta="-2.70%", delta_color="inverse")
+        st.metric(label="🌟 週末黃金 現貨", value="4,235.5", delta="+0.54%")
+
+st.markdown("---")
+
+# ==============================================================================
+# 三、每日盤後大戶資金流向統計 (籌碼面觀測站)
+# ==============================================================================
+st.markdown("### 🎯 每日盤後大戶資金流向統計 (籌碼面監控)")
+chips_buy_data = [
+    {"排名": 1, "族群": "元宇宙", "大戶差 (億)": 360.9, "今日漲跌幅": "+4.98%"},
+    {"排名": 2, "族群": "5G手機", "大戶差 (億)": 358.9, "今日漲跌幅": "+2.89%"},
+    {"排名": 3, "族群": "MIH平台概念股", "大戶差 (億)": 303.6, "今日漲跌幅": "+2.86%"},
+    {"排名": 4, "族群": "被動元件(C/R)", "大戶差 (億)": 267.0, "今日漲跌幅": "+9.90%"},
+    {"排名": 5, "族群": "MLCC", "大戶差 (億)": 246.3, "今日漲跌幅": "+9.44%"},
+]
+
+chips_sell_data = [
+    {"排名": 1, "族群": "IC封測", "大戶差 (億)": -83.55, "今日漲跌幅": "+0.83%"},
+    {"排名": 2, "族群": "低軌道衛星", "大戶差 (億)": -42.85, "今日漲跌幅": "-0.43%"},
+    {"排名": 3, "族群": "NAND Flash控制IC", "大戶差 (億)": -28.77, "今日漲跌幅": "+0.80%"},
+    {"排名": 4, "族群": "雲端運算", "大戶差 (億)": -27.94, "今日漲跌幅": "-1.26%"},
+    {"排名": 5, "族群": "探針卡", "大戶差 (億)": -26.86, "今日漲跌幅": "+3.00%"},
+]
+
+col_buy, col_sell = st.columns(2)
+with col_buy:
+    st.success("🛒 盤後大戶買超 TOP 5 (資金流入主攻部隊)")
+    st.dataframe(pd.DataFrame(chips_buy_data), use_container_width=True, hide_index=True)
+with col_sell:
+    st.error("📉 盤後大戶賣超 TOP 5 (資金流出/防範調節)")
+    st.dataframe(pd.DataFrame(chips_sell_data), use_container_width=True, hide_index=True)
+
+st.markdown("> 💡 **籌碼焦點筆記：** 資金持續流向電子主流族群，AI、車用電子與被動元件成市場焦點。部分大戶賣超族群（如IC封測、探針卡）出現『股價逆勢上漲』之背離現象，應嚴守風險纪律，切勿過度追高。")
+st.markdown("---")
+
+# ==============================================================================
+# 四、配置全球大盤與夜盤監控代號
+# ==============================================================================
 INDEX_CONFIG = {
     '^GSPC': {'name': '美股 S&P 500', 'type': '大盤'},
     '^IXIC': {'name': '美股 NASDAQ', 'type': '大盤'},
@@ -25,7 +98,7 @@ INDEX_CONFIG = {
     '^KS11': {'name': '韓國綜合指數', 'type': '大盤'}
 }
 
-# 4. 定義 AI 與衛星產業鏈分組清單 (跨美、日、韓、台)
+# 五、配置 AI 與衛星產業鏈跨國龍頭名單
 STOCK_CONFIG = {
     '核心晶片與算力': {
         'NVDA': {'name': 'NVIDIA', 'nation': '美'},
@@ -53,10 +126,12 @@ STOCK_CONFIG = {
     }
 }
 
-# 5. 資料抓取核心邏輯
-@st.cache_data(ttl=10) # 快取 10 秒避免頻繁對 Yahoo 發送請求被鎖
-def fetch_all_data():
-    # --- A. 抓取指數資料 ---
+# ==============================================================================
+# 資料抓取與清洗核心邏輯 (快取避免高頻刷榜被 Yahoo 封鎖)
+# ==============================================================================
+@st.cache_data(ttl=10)
+def fetch_financial_dashboard_data():
+    # --- A. 抓取全球大盤/夜盤數據 ---
     index_tickers = list(INDEX_CONFIG.keys())
     idx_data = yf.download(index_tickers, period='2d', interval='1m', progress=False)
     
@@ -66,7 +141,7 @@ def fetch_all_data():
             close_series = idx_data['Close'][ticker].dropna()
             if not close_series.empty:
                 current_val = close_series.iloc[-1]
-                prev_close = close_series.iloc[0] # 取得基準點計算漲跌
+                prev_close = close_series.iloc[0]
                 change_pct = ((current_val - prev_close) / prev_close) * 100
                 index_results.append({
                     '項目': INDEX_CONFIG[ticker]['name'],
@@ -76,20 +151,18 @@ def fetch_all_data():
                 })
         except:
             pass
-    
-    # --- B. 抓取產業鏈個股與基本面估值 ---
+
+    # --- B. 抓取個股基本面與動態估值 ---
     all_stock_tickers = []
     for group, stocks in STOCK_CONFIG.items():
         all_stock_tickers.extend(stocks.keys())
         
-    # 批量抓取個股今日即時 K 線
     stock_market_data = yf.download(all_stock_tickers, period='1d', interval='1m', progress=False)
     
     stock_results = []
     for group, stocks in STOCK_CONFIG.items():
         for ticker, info in stocks.items():
             try:
-                # 撈取即時價與漲跌幅
                 close_series = stock_market_data['Close'][ticker].dropna()
                 open_series = stock_market_data['Open'][ticker].dropna()
                 
@@ -97,8 +170,7 @@ def fetch_all_data():
                 open_price = open_series.iloc[0] if not open_series.empty else current_price
                 change_pct = ((current_price - open_price) / open_price) * 100 if open_price != 0 else 0.0
                 
-                # 獲取 Ticker Info (財務基本面：法人預估 PE 與 EPS)
-                # 注意：yf.Ticker().info 請求較慢，若遇到網路延遲會使用預設值
+                # 從 Ticker 獲取華爾街與法人財務估值
                 t_obj = yf.Ticker(ticker)
                 t_info = t_obj.info
                 
@@ -111,87 +183,85 @@ def fetch_all_data():
                     '國家': info['nation'],
                     '代號': ticker,
                     '公司名稱': info['name'],
-                    '當前股價': f"{current_price:,.2f} {currency}" if current_price else "未開盤",
+                    '當前股價': current_price,
+                    '幣別': currency,
                     '今日漲跌幅': change_pct,
-                    '法人預估本益比 (Forward PE)': f"{forward_pe:.2f} 倍" if forward_pe else "無資料",
-                    '法人預估明年 EPS': f"{forward_eps:.2f}" if forward_eps else "無資料"
+                    '法人預估本益比 (Forward PE)': forward_pe,
+                    '法人預估明年 EPS': forward_eps
                 })
-            except Exception as e:
+            except:
                 pass
                 
     return pd.DataFrame(index_results), pd.DataFrame(stock_results)
 
-# 執行資料抓取
-with st.spinner('正在從全球交易所同步最新大盤、夜盤及產業鏈估值數據...'):
-    df_index, df_stocks = fetch_all_data()
+# 執行線上同步資料交換
+with st.spinner('正在與全球證券交易所同步最新即時行情、期貨與法人估值...'):
+    df_index, df_stocks = fetch_financial_dashboard_data()
 
-# 6. 網頁前端排版與呈現
-# --- 區塊一：全球大盤與夜盤監控 ---
-st.markdown("## 📊 全球主要大盤 & 台指夜盤監控")
+# ==============================================================================
+# 前端介面排版輸出
+# ==============================================================================
+# --- 區塊四：全球主要大盤 & 台指夜盤監控 ---
+st.markdown("### 📊 全球主要大盤 & 台指夜盤即時監控")
 if not df_index.empty:
     cols = st.columns(len(df_index))
     for idx, row in df_index.iterrows():
         with cols[idx]:
-            # 根據漲跌決定 delta 顏色符號
             delta_str = f"{row['今日漲跌幅']:+.2f}%"
             st.metric(
                 label=f"{row['型態']} | {row['項目']}", 
                 value=row['當前點數'], 
-                delta=delta_str,
-                delta_color="normal"
+                delta=delta_str
             )
 else:
-    st.warning("暫時無法取得指數資料，請確認網路連線。")
+    st.warning("暫時無法取得指數資料。")
 
 st.markdown("---")
 
-# --- 區塊二：產業鏈分組看板 ---
-st.markdown(f"## 🚀 AI & 低軌衛星全球產業鏈觀測站 (更新時間: {datetime.now().strftime('%H:%M:%S')})")
+# --- 區塊五：AI & 低軌衛星全球產業鏈觀測站 (分頁標籤) ---
+st.markdown(f"### 🚀 AI & 低軌衛星全球產業鏈觀測站 (系統刷新時間: {datetime.now().strftime('%H:%M:%S')})")
 
 if not df_stocks.empty:
-    # 建立頁籤分門別類顯示
-    categories = list(STOCK_CONFIG.keys())
-    tabs = st.tabs(categories)
-# --- 區塊二：產業鏈分組看板 ---
-st.markdown(f"## 🚀 AI & 低軌衛星全球產業鏈觀測站 (更新時間: {datetime.now().strftime('%H:%M:%S')})")
-
-if not df_stocks.empty:
-    # 建立頁籤分門別類顯示
     categories = list(STOCK_CONFIG.keys())
     tabs = st.tabs(categories)
     
     for i, cat in enumerate(categories):
         with tabs[i]:
-            st.markdown(f"### 🎯 群組：{cat}")
+            st.markdown(f"#### 🎯 核心聚落：{cat}")
             
-            # 篩選出該產業別的資料并徹底複製，避免干擾原始資料
+            # 篩選該群組資料並完整複製
             df_sub = df_stocks[df_stocks['產業分組'] == cat].copy()
             
-            # 建立一個專門用來呈現給表格看的 DataFrame，保留原始數值給圖表用
+            # 【重要修正】：建立獨立的前台格式化展示表，將數字與繪圖資料流分離
             df_display = df_sub.copy()
+            df_display['當前股價'] = df_display.apply(lambda r: f"{r['當前股價']:,.2f} {r['幣別']}" if r['當前股價'] > 0 else "未開盤", axis=1)
             df_display['今日漲跌幅'] = df_display['今日漲跌幅'].apply(lambda x: f"{x:+.2f}%")
-            df_display = df_display.drop(columns=['產業分組'])
+            df_display['法人預估本益比 (Forward PE)'] = df_display['法人預估本益比 (Forward PE)'].apply(lambda x: f"{x:.2f} 倍" if pd.notnull(x) else "無資料")
+            df_display['法人預估明年 EPS'] = df_display['法人預估明年 EPS'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "無資料")
             
-            # 顯示美化後的表格
+            # 移除後台分析用的分類欄位後顯示
+            df_display = df_display.drop(columns=['產業分組', '幣別'])
             st.dataframe(df_display, use_container_width=True, hide_index=True)
             
-            # 繪製該分組的即時漲跌幅圖表（直接使用原始的數值 df_sub['今日漲跌幅']，不需 .str.replace）
+            # 繪製圖表：直接引用原始純數字數值 (df_sub)，完全避開字串型態報錯
             fig = go.Figure(go.Bar(
                 x=df_sub['公司名稱'] + " (" + df_sub['國家'] + ")",
-                y=df_sub['今日漲跌幅'], 
+                y=df_sub['今日漲跌幅'],
                 marker_color=['#ff4b4b' if x < 0 else '#00f574' for x in df_sub['今日漲跌幅']]
             ))
             fig.update_layout(
                 yaxis_title="今日漲跌幅 (%)",
-                xaxis_title="企業龍頭",
+                xaxis_title="龍頭企業企業",
                 height=300,
-                margin=dict(l=20, r=20, t=10, b=10)
+                margin=dict(l=20, r=20, t=15, b=15)
             )
-            st.plotly_chart(fig, use_container_width=True, key=f"chart_{i}")
+            st.plotly_chart(fig, use_container_width=True, key=f"chart_group_{i}")
 else:
     st.info("尚無個股與估值資料。")
 
-# 7. 自動重新整理邏輯
+# ==============================================================================
+# 7. 系統自動循環刷新頁面機制
+# ==============================================================================
 if auto_refresh:
     time.sleep(refresh_interval)
     st.rerun()
