@@ -620,13 +620,18 @@ from datetime import datetime, timedelta
 # 量化選股核心引擎 (正確掛接 FinMind 真實數據)
 # ==============================================================================
 
+import requests
+import pandas as pd
+import streamlit as st
+from datetime import datetime, timedelta
+
 @st.cache_data(ttl=3600)
-def fetch_finmind_data(dataset, stock_id):
+def get_finmind_data(dataset, stock_id):
     """通用 API 請求函式"""
     url = "https://api.finmindtrade.com/api/v4/data"
     params = {"dataset": dataset, "data_id": stock_id, "token": FINMIND_TOKEN}
     try:
-        res = requests.get(url, params=params, timeout=5).json()
+        res = requests.get(url, params=params, timeout=10).json()
         if res.get("data"):
             return pd.DataFrame(res["data"])
     except:
@@ -634,34 +639,46 @@ def fetch_finmind_data(dataset, stock_id):
     return pd.DataFrame()
 
 def get_real_metrics(stock_id):
-    """計算真實指標數值"""
-    # 1. 大戶指標: TaiwanStockShareholding (big_shareholder_ratio)
-    df_share = fetch_finmind_data("TaiwanStockShareholding", stock_id)
+    """
+    動態請求真實數據，並計算指標變化
+    """
+    # 1. 抓取大戶持股比例 (籌碼面)
+    df_share = get_finmind_data("TaiwanStockShareholding", stock_id)
     big_inc = 0
     if not df_share.empty and len(df_share) >= 2:
+        # 假設欄位為 big_shareholder_ratio
         big_inc = float(df_share['big_shareholder_ratio'].iloc[-1]) - float(df_share['big_shareholder_ratio'].iloc[-2])
 
-    # 2. 財報指標: TaiwanStockFinancialStatement (R&D_expense, contract_liability)
-    df_fin = fetch_finmind_data("TaiwanStockFinancialStatement", stock_id)
-    rd_inc = 0
-    con_liab_inc = 0
-    if not df_fin.empty:
-        # 需篩選特定季報欄位，此處範例為簡化邏輯
-        # 實務上請先用 st.write(df_fin.columns) 查看該股財報欄位名稱
-        pass 
-
-    # 3. 營收指標: TaiwanStockMonthlyRevenue
-    df_rev = fetch_finmind_data("TaiwanStockMonthlyRevenue", stock_id)
+    # 2. 抓取月營收 (營收面)
+    df_rev = get_finmind_data("TaiwanStockMonthlyRevenue", stock_id)
     rev_growth = 0
-    if not df_rev.empty and len(df_rev) >= 2:
+    if not df_rev.empty and len(df_rev) >= 1:
+        # 假設欄位為 revenue_month_growth_rate
         rev_growth = float(df_rev['revenue_month_growth_rate'].iloc[-1])
+
+    # 3. 抓取財報 (研發與合約負債 - 使用篩選語法)
+    df_fin = get_finmind_data("TaiwanStockFinancialStatement", stock_id)
+    rd_growth = 0
+    con_liab = 0
+    if not df_fin.empty:
+        # 財報需要過濾特定項目 (type)
+        rd_data = df_fin[df_fin['type'] == '研究發展費用']
+        if not rd_data.empty:
+            rd_growth = float(rd_data['value'].iloc[-1])
+        
+        liab_data = df_fin[df_fin['type'] == '合約負債']
+        if not liab_data.empty:
+            con_liab = float(liab_data['value'].iloc[-1])
 
     return {
         "大戶增": round(big_inc, 2),
-        "研發增": "檢查欄位", 
-        "合約負債增": "檢查欄位",
+        "研發費用": round(rd_growth, 0),
+        "合約負債": round(con_liab, 0),
         "月營收雙增": round(rev_growth, 2)
     }
+
+# 呼叫並顯示
+# 在您的迴圈中直接使用: metrics = get_real_metrics(sid)
 
 # ==============================================================================
 # UI 顯示區塊
