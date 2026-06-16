@@ -140,7 +140,7 @@ with col_sell:
 st.markdown("---")
 
 # ==============================================================================
-# 四、大盤與夜盤監控配置 (動態判斷：+紅、-綠)
+# 四、大盤與夜盤監控配置
 # ==============================================================================
 INDEX_CONFIG = {
     '^GSPC': {'name': '美股 S&P 500', 'type': '大盤'},
@@ -184,7 +184,7 @@ if not idx_market_data.empty:
 st.markdown("---")
 
 # ==============================================================================
-# 五、依據權威圖表優化後的 5 大主力板塊配置庫 (共 27 檔焦點核心池)
+# 五、焦點核心池板塊配置庫 (共 27 檔)
 # ==============================================================================
 TW_STOCK_CONFIG = {
     '1. 被動元件 (多頭總司令)': {
@@ -391,13 +391,13 @@ with view_tab2:
 st.markdown("---")
 
 # ==============================================================================
-# 九、重磅功能修正：【Google Finance 即時加權指數抓取】+【台指期量化導航引擎】+【五關價】
+# 九、重磅功能修正：【動態現貨比例解鎖】+【台指期量化導航引擎】
 # ==============================================================================
-st.markdown("### 📊 台指期主動交易決策與分析儀表板 (核心演算法解密補足版)")
-st.caption("本模組整合：**Google Finance 即時大盤基差**、FinMind 外資期貨淨部位、以及基於當日高低點動態推算之「盤中五關壓力支撐關卡」。")
+st.markdown("### 📊 台指期主動交易決策與分析儀表板")
+st.caption("本模組整合：**Google Finance 即時大盤基差**、FinMind 外資期貨淨部位、以及當日動態五關價。")
 
 def get_google_finance_taiex():
-    """核心改造：直接從 Google Finance 即時解析台股加權指數 (TAIEX)"""
+    """解析 Google Finance 即時加權指數"""
     url = "https://www.google.com/finance/quote/TAIEX:TPE"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -406,7 +406,6 @@ def get_google_finance_taiex():
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
-            # Google Finance 價格常見的動態定位器
             price_element = soup.find("div", {"class": "ymu9sg"})
             if not price_element:
                 price_element = soup.find("span", {"class": "lastPrice"})
@@ -424,7 +423,8 @@ def fetch_tx_reports_core_logic():
     today_str = datetime.now().strftime("%Y-%m-%d")
     prev_str = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
     
-    tx_price, open_p, high_p, low_p = 21530.0, 21500.0, 21580.0, 21480.0
+    # 🌟 修正：同步將備用基準值調高至 44,000 點時代，避免回跌極端值
+    tx_price, open_p, high_p, low_p = 44150.0, 44100.0, 44250.0, 44050.0
     foreign_net_oi = -12450  
     
     try:
@@ -450,19 +450,20 @@ def fetch_tx_reports_core_logic():
 
     return tx_price, open_p, high_p, low_p, foreign_net_oi
 
-# 執行數據清洗運算
+# 執行數據清洗
 tx_price, open_p, high_p, low_p, foreign_net_oi = fetch_tx_reports_core_logic()
 
-# ⚙️ 核心修正：讀取 Google Finance 即時現貨指數，若失敗則退回 Yahoo 報價
+# 讀取現貨指數
 tw_index = get_google_finance_taiex()
-if tw_index is None:
+if tw_index is None or tw_index == 0.0:
     tw_index = shared_prices.get("^TWII", 0.0)
 
-# 🛑【黃金防呆熔斷機制】若兩者皆失效或讀取偏離值大於 1000 點（防止出現兩萬多點巨大逆價差），強制校正
-if tw_index == 0.0 or abs(tx_price - tw_index) > 1000:
-    tw_index = tx_price + 25.0  # 強制還原至合理的微幅價差基準面
+# 🛑【優化後的動態百分比熔斷機制】
+# 拋棄原本死板的 1,000 點限制。只有當現貨偏離期貨超過 15% 時（極端異常），才進行合理校正。
+if tw_index == 0.0 or abs(tx_price - tw_index) / tx_price > 0.15:
+    tw_index = tx_price - 15.0  # 若兩者皆斷線失效，預設給予合理的逆價差貼水
 
-# 完美計算期現貨精準價差
+# 精準計算實時期現貨基差
 spread_points = tx_price - tw_index
 tx_pct = ((tx_price - open_p) / open_p) * 100 if open_p > 0 else 0.0
 
@@ -485,7 +486,7 @@ five_gates_data = [
 ]
 st.dataframe(pd.DataFrame(five_gates_data), use_container_width=True, hide_index=True)
 
-# 訊號交叉判定矩陣
+# 訊號交叉判定
 decision_score = 0
 if spread_points > 0: decision_score += 2  
 if foreign_net_oi > -5000: decision_score += 3  
@@ -510,7 +511,7 @@ with st.container():
     with c_tx1: st.metric(label="🎯 台指期當前價", value=f"{tx_price:,.1f}", delta=f"{tx_pct:+.2f}% (距開盤)")
     with c_tx2: st.metric(label="🔄 實時期現貨基差", value=f"{spread_points:+.1f} 點", delta="正價差領先" if spread_points >= 0 else "逆價差避險")
     with c_tx3: st.metric(label="🕵️ 外資期貨未平倉部位", value=f"{foreign_net_oi:,} 口", delta="多頭安全" if foreign_net_oi > -10000 else "空頭高壓警戒")
-    with c_tx4: st.metric(label="📊 盤中最高 / 最低波幅", value=f"{high_p:,.1f}", delta=f"最低 {low_p:,.1f}", delta_color="normal")
+    with c_tx4: st.metric(label="📊 加權現貨真實指引", value=f"{tw_index:,.2f}", delta=f"最低波幅 {low_p:,.1f}", delta_color="normal")
         
     if tx_color == "error": st.error(f"🧭 **當前台指量化導航訊號：{tx_signal}**\n\n{tx_desc}")
     elif tx_color == "warning": st.warning(f"🧭 **當前台指量化導航訊號：{tx_signal}**\n\n{tx_desc}")
@@ -519,7 +520,7 @@ with st.container():
 st.markdown("---")
 
 # ==============================================================================
-# 十、雙主線量化籌碼戰責引擎 (個股策略 + 融入大戶反向籌碼心理學註解)
+# 十、雙主線量化籌碼戰責引擎
 # ==============================================================================
 def get_strategy_pool():
     pool = []
@@ -559,7 +560,6 @@ def run_dual_chip_strategies():
                     curr_p = hist['Close'].iloc[-1]
                     ma5 = hist['Close'].rolling(window=5).mean().iloc[-1]
                     
-                    # 戰略 A
                     cond_sell_off_a = sum(1 for x in previous_6d if x < 0) >= 3
                     cond_first_root = yesterday_chip <= 0 and today_chip > 0
                     avg_prev_sell = sum(x for x in previous_6d if x < 0) / max(sum(1 for x in previous_6d if x < 0), 1)
@@ -573,7 +573,6 @@ def run_dual_chip_strategies():
                                 "洗盤期賣超高頻天數": f"{sum(1 for x in previous_6d if x < 0)} / 6 天"
                             })
                             
-                    # 戰略 B
                     cond_persistent_sell = sum(1 for x in full_9d if x < 0) >= 6
                     cond_no_rebound = sum(1 for x in recent_3d if x < 0) == 3 or (sum(recent_3d) < 0 and today_chip < 0)
                     
@@ -619,7 +618,7 @@ with strat_tab2:
         with col_t2:
             df_disp2 = df_strat_sellout.copy()
             df_disp2['近3日遭提款累積(張)'] = df_disp2['近3日遭提款累積(張)'].apply(lambda x: f"{x:,.0f} 張")
-            df_disp2['今日外資續賣(張)'] = df_disp2['今日外資續賣(張)'].apply(lambda x: f"{x:,.0f} 張")
+            df_disp2['今日外資續賣(張)'] = df_disp2['今日外資續卖(張)'].apply(lambda x: f"{x:,.0f} 張")
             st.dataframe(df_disp2, use_container_width=True, hide_index=True)
         with col_c2:
             fig2 = go.Figure(go.Bar(
