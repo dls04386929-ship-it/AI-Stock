@@ -232,7 +232,7 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度全市場選股引擎 (透明數值版：每波 50 檔完整動態列出 4 指標真實數據，2指標過關)
+# 七、深度全市場選股引擎 (透明數值+欄位對齊修正版，2指標過關)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
@@ -281,7 +281,6 @@ def run_relaxed_fundamental_screener(stock_list_pool):
     batch_results = []
     
     for idx, (stock_id, stock_name) in enumerate(target_batch):
-        # 更新動態進度條
         progress_bar.progress((idx + 1) / len(target_batch))
         status_log.text(f"🔍 正在向交易所/FinMind索取真實數值: {stock_id} {stock_name}...")
         
@@ -292,6 +291,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
             rd_txt = "⚠️ 無財報數據"
             cl_txt = "⚠️ 無合約負債"
             chip_txt = "⚠️ 無籌碼數據"
+            val_cl_pure = 0.0 # 用於補齊前端 drop 欄位的預設純數值
             
             # 1. 索取並驗證月營收真實數值
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
@@ -330,6 +330,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 if not df_cl.empty and len(df_cl) >= 2:
                     val_cl_now = df_cl.iloc[-1]['value'] / 100000000
                     val_cl_prev = df_cl.iloc[-2]['value'] / 100000000
+                    val_cl_pure = val_cl_now # 填入純數字
                     if df_cl.iloc[-1]['value'] >= df_cl.iloc[-2]['value'] * 0.95:
                         score += 1
                         cl_txt = f"🟢 高檔 ({val_cl_now:.2f}億 / 前: {val_cl_prev:.2f}億)"
@@ -351,7 +352,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                     else:
                         chip_txt = f"❌ 渙散 ({c_pct:.1f}% <- 上週 {p_pct:.1f}%)"
                         
-            # 不論是否過關，通通塞入結果清單，實踐「數值完全透明監控」
+            # 【關鍵修復核心】：在字典結尾補上 "純數字合約負債" 欄位，與您前端 464 行的 drop 邏輯完美對齊
             batch_results.append({
                 "股票代碼": stock_id, 
                 "公司名稱": stock_name, 
@@ -360,28 +361,27 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 "合約負債真實增減": cl_txt, 
                 "月營收真實表現": rev_txt,
                 "符合指標數": f"{score}/4",
-                "決策篩選結果": "🔥 獲選黑馬股" if score >= 2 else "⏳ 觀望中"
+                "決策篩選結果": "🔥 獲選黑馬股" if score >= 2 else "⏳ 觀望中",
+                "純數字合約負債": val_cl_pure
             })
-            time.sleep(0.1) # 基本流控防止鎖 IP
+            time.sleep(0.1) 
         except: 
             pass
         
     status_log.empty()
     
-    # 儲存當前這組 50 檔的數據到狀態機中
     st.session_state.current_batch_raw_data = batch_results
     st.session_state.scan_pointer += batch_size
     
     st.success(f"💡 本組 50 檔電子股已動態解鎖，以下為 API 撈取到的真實數值明細表：")
     
-    # 實作 60 秒冷卻倒數動態顯示，不鎖死網頁
+    # 用計時器實作 60 秒冷卻倒數動態顯示
     countdown_placeholder = st.empty()
     for remaining in range(60, 0, -1):
         countdown_placeholder.warning(f"⏳ 遵守伺服器防護紀律，冷卻保護中... 將於 {remaining} 秒後自動解鎖下一組 50 檔。")
         time.sleep(1)
     countdown_placeholder.success("✅ 冷卻完畢！下一組 50 檔雷達已就緒，請點擊下方按鈕繼續掃描。")
     
-    # 觸發重新整理按鈕
     if st.button("🚀 立即啟動下一組 50 檔電子股深層掃描", key="next_batch_trigger"):
         st.rerun()
         
