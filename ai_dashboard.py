@@ -617,17 +617,38 @@ import requests
 import time
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def get_electronics_pool():
-    # 1. 抓取全市場股票資訊
     url = "https://api.finmindtrade.com/api/v4/data"
     params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
     res = requests.get(url, params=params).json()
+    
+    # 1. 確保有拿到資料
+    if 'data' not in res or not res['data']:
+        st.error("無法取得股票資訊，請檢查 API Token 或網路連線")
+        return []
+    
     df_all = pd.DataFrame(res['data'])
     
-    # 2. 篩選電子產業 (半導體、電腦、電子零件、網通)
-    electronics = df_all[df_all['industry'].str.contains('半導體|電子|電腦|通訊', na=False)]
-    return electronics['stock_id'].unique().tolist()
-
+    # 2. 【除錯用】印出所有欄位，看看真正的欄位名稱是什麼
+    # st.write(df_all.columns.tolist()) 
+    
+    # 3. 嘗試找尋產業相關的欄位
+    # 常見可能是 'industry_name' 或 'type'，若找不到，請根據上一步印出的清單修改
+    target_col = 'industry' 
+    if 'industry_name' in df_all.columns:
+        target_col = 'industry_name'
+    elif 'type' in df_all.columns:
+        target_col = 'type'
+        
+    # 執行過濾
+    try:
+        electronics = df_all[df_all[target_col].str.contains('半導體|電子|電腦|通訊', na=False)]
+        return electronics['stock_id'].unique().tolist()
+    except Exception as e:
+        st.error(f"篩選產業欄位失敗，欄位清單為: {df_all.columns.tolist()}")
+        return []
+        
 def fetch_real_data(stock_id):
     """
     此處為邏輯框架，需串接 FinMind 對應 dataset
