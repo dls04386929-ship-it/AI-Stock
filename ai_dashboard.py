@@ -154,6 +154,10 @@ st.markdown("### 📊 全球主要大盤 & 台指夜盤即時監控")
 index_tickers = list(INDEX_CONFIG.keys())
 idx_market_data = yf.download(index_tickers, period='2d', interval='1m', progress=False)
 
+# 全局共用價格字典，供下方台指期分析儀表板調用
+shared_prices = {"^GSPC": 0.0, "^IXIC": 0.0, "^TWII": 0.0, "WTW=F": 0.0, "^N225": 0.0, "^KS11": 0.0}
+shared_chg = {"^GSPC": 0.0, "^IXIC": 0.0, "^TWII": 0.0, "WTW=F": 0.0, "^N225": 0.0, "^KS11": 0.0}
+
 if not idx_market_data.empty:
     cols = st.columns(len(index_tickers))
     for idx, t in enumerate(index_tickers):
@@ -164,6 +168,11 @@ if not idx_market_data.empty:
                     curr_val = close_s.iloc[-1]
                     prev_val = close_s.iloc[0]
                     chg_pct = ((curr_val - prev_val) / prev_val) * 100
+                    
+                    # 存入全局變數
+                    shared_prices[t] = curr_val
+                    shared_chg[t] = chg_pct
+                    
                     with cols[idx]:
                         col_mode = "inverse" if chg_pct >= 0 else "normal"
                         st.metric(
@@ -322,7 +331,7 @@ if not df_tw_rot.empty:
         st.metric(
             label=f"🥈 次強主流板塊：{df_tw_rot_sorted.iloc[1]['族群']}", 
             value=f"{df_tw_rot_sorted.iloc[1]['平均漲跌幅']:+.2f}%", 
-            delta=f"上漲比例 {df_tw_rot_sorted.iloc[1]['上漲家數比']}",
+            delta=f"上漲比例 {df_tw_rot_sorted.iloc[1]['上漲家漲比'] if '上漲家漲比' in df_tw_rot_sorted.columns else df_tw_rot_sorted.iloc[1]['上漲家數比']}",
             delta_color="inverse" if df_tw_rot_sorted.iloc[1]['平均漲跌幅'] >= 0 else "normal"
         )
     with c_l3: 
@@ -396,7 +405,75 @@ with view_tab2:
 st.markdown("---")
 
 # ==============================================================================
-# 九、雙主線量化籌碼戰略引擎 (精準監控：轉買第一根 VS 持續提款尚未認錯)
+# 十、新增功能：台指期交易決策與分析儀表板 (置於系統最下方核心決策區)
+# ==============================================================================
+st.markdown("### 📊 台指期交易決策與分析儀表板 (a0936680360-afk.github.io 雲端鏡像整合)")
+st.caption("即時量化模型基準：動態追蹤台指夜盤價差變化、國際多空共振指標，提供高勝率盤面波段與當沖多空導航。")
+
+with st.container():
+    # 進行台指期關鍵數據運算
+    tx_price = shared_prices.get("WTW=F", 0.0)    # 台指期最新價
+    tw_index = shared_prices.get("^TWII", 0.0)    # 加權指數
+    
+    # 計算基差 / 夜盤動態實時價差
+    spread = tx_price - tw_index if tx_price > 0 and tw_index > 0 else 0.0
+    spread_type = "🎯 正價差 (多頭領先偏多)" if spread >= 0 else "⚡ 逆價差 (避險貼水偏空)"
+    
+    # 計算國際市場多空共振權重 (S&P 500, NASDAQ, 日經, 韓國)
+    global_weights = {
+        "^GSPC": 0.35,  # S&P500
+        "^IXIC": 0.35,  # NASDAQ
+        "^N225": 0.15,  # 日經
+        "^KS11": 0.15   # 韓國
+    }
+    
+    resonance_score = 0.0
+    for ticker, weight in global_weights.items():
+        resonance_score += shared_chg.get(ticker, 0.0) * weight
+        
+    if resonance_score >= 0.5:
+        resonance_status = "🔴 強烈多頭共振 (美日韓全面主攻)"
+        strategy_tip = "【偏多操作】國際盤勢極強，台指期易受資金推升，建議順勢尋找支撐點切入多單，切勿盲目猜頂放空。"
+    elif 0.0 <= resonance_score < 0.5:
+        resonance_status = "🟡 溫和多頭震盪 (國際板塊防守)"
+        strategy_tip = "【區間偏多】市場具備防守力道但追高意願有限，適合拉回尋找均線支撐進行短單操作。"
+    elif -0.5 <= resonance_score < 0.0:
+        resonance_status = "🔵 弱勢空頭調整 (國際資金提款)"
+        strategy_tip = "【區間偏空】美股或亞股出現局部修正壓力，台指期高位震盪加劇，操作宜保留資金，靜待賣壓消化。"
+    else:
+        resonance_status = "🟢 強烈空頭共振 (國際系統性避險)"
+        strategy_tip = "【避險保守】國際盤全面重挫，台指期逆價差可能擴大，夜盤有急殺洗盤風險，多單應嚴設停損或適度避險。"
+
+    # 呈現決策儀表板核心 Metric 指標
+    col_tx1, col_tx2, col_tx3 = st.columns(3)
+    with col_tx1:
+        st.metric(
+            label="🎯 臺指期近月實時報價 (夜盤/盤中)", 
+            value=f"{tx_price:,.2f}" if tx_price > 0 else "交易盤前/等待報價",
+            delta=f"{shared_chg.get('WTW=F', 0.0):+.2f}%"
+        )
+    with col_tx2:
+        st.metric(
+            label=f"🔄 夜盤/動態即時價差 ({spread_type})", 
+            value=f"{spread:+.2f} 點" if tx_price > 0 and tw_index > 0 else "計算中...",
+            delta="領先現貨表態" if spread >= 0 else "避險情緒升溫",
+            delta_color="inverse" if spread >= 0 else "normal"
+        )
+    with col_tx3:
+        st.metric(
+            label="🌍 國際大盤多空共振總分 (美日韓加權)", 
+            value=f"{resonance_score:+.2f} 分",
+            delta=resonance_status,
+            delta_color="inverse" if resonance_score >= 0 else "normal"
+        )
+        
+    # 策略導航面板
+    st.info(f"🧭 **台指期多空看盤策略導航提示：**\n\n{strategy_tip}")
+
+st.markdown("---")
+
+# ==============================================================================
+# 十一、雙主線量化籌碼戰責引擎 (原個股策略移至此處)
 # ==============================================================================
 def get_strategy_pool():
     pool = []
@@ -463,7 +540,6 @@ def run_dual_chip_strategies():
                     # ----------------------------------------------------------
                     # 戰略 B：外資【持續避險提款、尚未認錯】風險警示池
                     # ----------------------------------------------------------
-                    # 條件：近 9 天內有 6 天以上是賣超，且近 3 天「天天都在賣」或累積賣超極重，完全沒有收手跡象
                     cond_persistent_sell = sum(1 for x in full_9d if x < 0) >= 6
                     cond_no_rebound = sum(1 for x in recent_3d if x < 0) == 3 or (sum(recent_3d) < 0 and today_chip < 0)
                     
@@ -513,7 +589,6 @@ with strat_tab2:
             df_disp2['今日外資續賣(張)'] = df_disp2['今日外資續賣(張)'].apply(lambda x: f"{x:,.0f} 張")
             st.dataframe(df_disp2, use_container_width=True, hide_index=True)
         with col_c2:
-            # 賣超用絕對值畫正向條形圖，但顏色用綠色代表流出
             fig2 = go.Figure(go.Bar(
                 x=df_strat_sellout['公司名稱'], y=df_strat_sellout['近3日遭提款累積(張)'].abs(),
                 marker_color='#00f574', text=df_strat_sellout['近3日遭提款累積(張)'].apply(lambda x: f"{x:,.0f}張"), textposition='auto'
@@ -524,7 +599,7 @@ with strat_tab2:
         st.success("🟢 傲人表現！目前監控池內的所有個股，皆無落入『外資密集高頻率連續殺盤』的重災區。")
 
 # ==============================================================================
-# 十、網頁定時自動循環刷新機制
+# 十二、網頁定時自動循環刷新機制
 # ==============================================================================
 if auto_refresh:
     time.sleep(refresh_interval)
