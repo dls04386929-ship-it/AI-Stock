@@ -32,7 +32,7 @@ with st.container():
     with col_law2:
         st.warning("⚠️ **3. 控制風險**\n\n⏳ **4. 長期持有**")
     with col_law3:
-        st.success("📚 **5. 持續學習**\n\n🎯 **6. 堅守紀律**")
+        st.success("📚 **5. 持續學習**\n\n🎯 **6.堅守紀律**")
     with col_law4:
         st.error("🔇 **7. 忽略噪音**\n\n💰 **8. 先存緊急準備金**")
 
@@ -54,7 +54,8 @@ with st.container():
         st.metric(label="🇭🇰 週末香港 HS50 現貨", value="24,752.9", delta="+0.28%")
         st.metric(label="🇦🇺 週末澳洲 200", value="8,860.2", delta="+0.19%")
     with col_m4:
-        st.metric(label="🛢️ 週末美國原油 現貨", value="8,070.6", delta="-2.70%", delta_color="inverse")
+        # 修改為台灣人習慣：油價下跌為綠色利多，故 delta_color 保持預設即可
+        st.metric(label="🛢️ 週末美國原油 現貨", value="8,070.6", delta="-2.70%")
         st.metric(label="🌟 週末黃金 現貨", value="4,235.5", delta="+0.54%")
 
 st.markdown("---")
@@ -127,7 +128,7 @@ with col_sell:
 st.markdown("---")
 
 # ==============================================================================
-# 四、大盤與夜盤監控配置
+# 四、大盤與夜盤監控配置 (配色修改：上漲紅、下跌綠)
 # ==============================================================================
 INDEX_CONFIG = {
     '^GSPC': {'name': '美股 S&P 500', 'type': '大盤'},
@@ -152,7 +153,14 @@ if not idx_market_data.empty:
                 prev_val = close_s.iloc[0]
                 chg_pct = ((curr_val - prev_val) / prev_val) * 100
                 with cols[idx]:
-                    st.metric(label=f"{INDEX_CONFIG[t]['type']} | {INDEX_CONFIG[t]['name']}", value=f"{curr_val:,.2f}", delta=f"{chg_pct:+.2f}%")
+                    # 邏輯轉換：如果是負數(下跌)，用 normal (Streamlit預設綠色)；如果是正數(上漲)，用 inverse (轉為紅色)
+                    col_mode = "inverse" if chg_pct >= 0 else "normal"
+                    st.metric(
+                        label=f"{INDEX_CONFIG[t]['type']} | {INDEX_CONFIG[t]['name']}", 
+                        value=f"{curr_val:,.2f}", 
+                        delta=f"{chg_pct:+.2f}%",
+                        delta_color=col_mode
+                    )
         except: pass
 st.markdown("---")
 
@@ -160,7 +168,6 @@ st.markdown("---")
 # ==============================================================================
 # 五、兩大觀測站的資料庫配置 (1. 台股強勢鏈 / 2. 美日韓龍頭鏈)
 # ==============================================================================
-# 觀測站 A：台股強勢板塊鏈觀測站 (精準包含上傳圖片的所有 27 檔標的)
 TW_STOCK_CONFIG = {
     '被動元件聚落': {
         '2327.TW': '國巨', '2492.TW': '華新科', '2375.TW': '凱美', '3026.TW': '禾伸堂',
@@ -185,7 +192,6 @@ TW_STOCK_CONFIG = {
     }
 }
 
-# 觀測站 B：美日韓對應產業龍頭族群 (戰略鏡像對比)
 GLOBAL_STOCK_CONFIG = {
     '核心算力與GPU (美日韓)': {
         'NVDA': {'name': 'NVIDIA (全球算力霸主)', 'nation': '美'},
@@ -198,7 +204,7 @@ GLOBAL_STOCK_CONFIG = {
     },
     '半導體設備與先進材料 (日美)': {
         '8035.T': {'name': '東京威力科創 (Tokyo Electron)', 'nation': '日'},
-        '6857.T': {'name': ' Advantest (愛德萬測試)', 'nation': '日'},
+        '6857.T': {'name': 'Advantest (愛德萬測試)', 'nation': '日'},
         'AMAT': {'name': '應用材料 (Applied Materials)', 'nation': '美'},
         'ASML': {'name': 'ASML (荷蘭商/美股掛牌艾司摩爾)', 'nation': '美'}
     },
@@ -207,18 +213,17 @@ GLOBAL_STOCK_CONFIG = {
         'LHX': {'name': 'L3Harris (國防低軌衛星關鍵)', 'nation': '美'}
     },
     '全球被動元件與精密光學 (日)': {
-        '6981.T': {'name': '村田製作所 (Murata - 全球MLCC龙頭)', 'nation': '日'},
+        '6981.T': {'name': '村田製作所 (Murata - 全球MLCC龍頭)', 'nation': '日'},
         '6976.T': {'name': '太陽誘電 (Taiyo Yuden - 高階被動元件)', 'nation': '日'},
         '7731.T': {'name': 'Nikon (精密光學與半導體鏡頭)', 'nation': '日'}
     }
 }
 
 # ==============================================================================
-# 六、大數據動態運算引擎 (同時抓取兩大系統並計算即時輪動)
+# 六、大數據動態運算引擎
 # ==============================================================================
 @st.cache_data(ttl=15)
 def process_all_market_intelligence():
-    # 彙整所有需要查詢的 Tickers
     tw_tickers = []
     for s in TW_STOCK_CONFIG.values(): tw_tickers.extend(s.keys())
     global_tickers = []
@@ -251,7 +256,7 @@ def process_all_market_intelligence():
                     })
             except: pass
         if group_pcts:
-            tw_rotation.append({'族群': group, '平均漲跌幅': sum(group_pcts)/len(group_pcts), '上漲家數比': f"{up_c}/{len(group_pcts)}"})
+            tw_rotation.append({'族群': group, '平均漲跌幅': sum(group_pcts)/len(group_pcts), '上漸家數比': f"{up_c}/{len(group_pcts)}"})
             
     # 2. 運算美日韓數據
     global_results = []
@@ -277,24 +282,49 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、【新亮點呈現 A】今日台股資金輪動即時量化看板
+# 七、【看板配色修改】今日台股資金輪動即時量化看板 (上漲紅、下跌綠)
 # ==============================================================================
 st.markdown("### 🔥 今日台股主流板塊輪動強弱榜")
 if not df_tw_rot.empty:
     df_tw_rot_sorted = df_tw_rot.sort_values(by='平均漲跌幅', ascending=False)
     c_l1, c_l2, c_l3 = st.columns(3)
-    with c_l1: st.metric(label=f"🥇 台股多頭總司令：{df_tw_rot_sorted.iloc[0]['族群']}", value=f"{df_tw_rot_sorted.iloc[0]['平均漲跌幅']:+.2f}%", delta=f"上漲比例 {df_tw_rot_sorted.iloc[0]['上漲家數比']}")
-    with c_l2: st.metric(label=f"🥈 次強主流板塊：{df_tw_rot_sorted.iloc[1]['族群']}", value=f"{df_tw_rot_sorted.iloc[1]['平均漲跌幅']:+.2f}%", delta=f"上漲比例 {df_tw_rot_sorted.iloc[1]['上漲家數比']}")
-    with c_l3: st.metric(label=f"⚠️ 今日最弱勢調整族群：{df_tw_rot_sorted.iloc[-1]['族群']}", value=f"{df_tw_rot_sorted.iloc[-1]['平均漲跌幅']:+.2f}%", delta=f"上漲比例 {df_tw_rot_sorted.iloc[-1]['上漲家數比']}", delta_color="inverse")
     
-    fig_rot = go.Figure(go.Bar(y=df_tw_rot_sorted['族群'], x=df_tw_rot_sorted['平均漲跌幅'], orientation='h', marker_color=['#00f574' if x>=0 else '#ff4b4b' for x in df_tw_rot_sorted['平均漲跌幅']]))
+    with c_l1: 
+        st.metric(
+            label=f"🥇 台股多頭總司令：{df_tw_rot_sorted.iloc[0]['族群']}", 
+            value=f"{df_tw_rot_sorted.iloc[0]['平均漲跌幅']:+.2f}%", 
+            delta=f"上漲比例 {df_tw_rot_sorted.iloc[0]['上漸家數比']}",
+            delta_color="inverse" if df_tw_rot_sorted.iloc[0]['平均漲跌幅'] >= 0 else "normal"
+        )
+    with c_l2: 
+        st.metric(
+            label=f"🥈 次強主流板塊：{df_tw_rot_sorted.iloc[1]['族群']}", 
+            value=f"{df_tw_rot_sorted.iloc[1]['平均漲跌幅']:+.2f}%", 
+            delta=f"上漲比例 {df_tw_rot_sorted.iloc[1]['上漸家數比']}",
+            delta_color="inverse" if df_tw_rot_sorted.iloc[1]['平均漲跌幅'] >= 0 else "normal"
+        )
+    with c_l3: 
+        st.metric(
+            label=f"⚠️ 今日最弱勢調整族群：{df_tw_rot_sorted.iloc[-1]['族群']}", 
+            value=f"{df_tw_rot_sorted.iloc[-1]['平均漲跌幅']:+.2f}%", 
+            delta=f"上漲比例 {df_tw_rot_sorted.iloc[-1]['上漸家數比']}",
+            delta_color="inverse" if df_tw_rot_sorted.iloc[-1]['平均漲跌幅'] >= 0 else "normal"
+        )
+    
+    # 圖表配色修改：大於等於0為台股紅（#ff4b4b），小於0為台股綠（#00f574）
+    fig_rot = go.Figure(go.Bar(
+        y=df_tw_rot_sorted['族群'], 
+        x=df_tw_rot_sorted['平均漲跌幅'], 
+        orientation='h', 
+        marker_color=['#ff4b4b' if x >= 0 else '#00f574' for x in df_tw_rot_sorted['平均漲跌幅']]
+    ))
     fig_rot.update_layout(height=220, margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_rot, use_container_width=True, key="tw_rot_chart")
 st.markdown("---")
 
 
 # ==============================================================================
-# 八、雙戰略觀測站分頁聯動展示
+# 八、雙戰略觀測站分頁展示 (個股圖表同步修改為：上漲紅、下跌綠)
 # ==============================================================================
 view_tab1, view_tab2 = st.tabs(["🇹🇼 觀測站一：台股強勢板塊鏈觀測站 (27檔焦點股)", "🇺🇸🇯🇵🇰🇷 觀測站二：美日韓對應產業國際龍頭觀測站"])
 
@@ -314,7 +344,12 @@ with view_tab1:
                 df_disp['預估明年 EPS'] = df_disp['預估明年 EPS'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "無資料")
                 st.dataframe(df_disp.drop(columns=['產業分組']), use_container_width=True, hide_index=True)
                 
-                fig = go.Figure(go.Bar(x=df_sub['公司名稱'], y=df_sub['今日漲跌幅'], marker_color=['#ff4b4b' if x<0 else '#00f574' for x in df_sub['今日漲跌幅']]))
+                # 個股圖表配色反轉：大於等於0用紅（#ff4b4b），小於0用綠（#00f574）
+                fig = go.Figure(go.Bar(
+                    x=df_sub['公司名稱'], 
+                    y=df_sub['今日漲跌幅'], 
+                    marker_color=['#ff4b4b' if x >= 0 else '#00f574' for x in df_sub['今日漲跌幅']]
+                ))
                 fig.update_layout(height=240, margin=dict(l=10, r=10, t=10, b=10))
                 st.plotly_chart(fig, use_container_width=True, key=f"tw_chart_{i}")
 
@@ -334,7 +369,12 @@ with view_tab2:
                 df_disp['Forward PE'] = df_disp['Forward PE'].apply(lambda x: f"{x:.2f} 倍" if pd.notnull(x) else "無資料")
                 st.dataframe(df_disp.drop(columns=['國際群組', '幣別']), use_container_width=True, hide_index=True)
                 
-                fig = go.Figure(go.Bar(x=df_sub['公司'] + " (" + df_sub['國家'] + ")", y=df_sub['今日漲跌幅'], marker_color=['#ff4b4b' if x<0 else '#00f574' for x in df_sub['今日漲beat_pct']]))
+                # 國際個股圖表配色同步反轉：大於等於0用紅（#ff4b4b），小於0用綠（#00f574）
+                fig = go.Figure(go.Bar(
+                    x=df_sub['公司'] + " (" + df_sub['國家'] + ")", 
+                    y=df_sub['今日漲跌幅'], 
+                    marker_color=['#ff4b4b' if x >= 0 else '#00f574' for x in df_sub['今日漲跌幅']]
+                ))
                 fig.update_layout(height=240, margin=dict(l=10, r=10, t=10, b=10))
                 st.plotly_chart(fig, use_container_width=True, key=f"gl_chart_{i}")
 
