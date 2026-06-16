@@ -396,11 +396,8 @@ with view_tab2:
 st.markdown("---")
 
 # ==============================================================================
-# 九、新功能：外資避險洗盤後「認錯回補」策略量化引擎 (置於最下方)
+# 九、雙主線量化籌碼戰略引擎 (精準監控：轉買第一根 VS 持續提款尚未認錯)
 # ==============================================================================
-st.markdown("### 🎯 師傅傳授：外資避險洗盤後『認錯回補』起漲訊號點")
-st.caption("策略邏輯：國際震盪、個股無利空時外資避險洗盤出脫(洗散戶) ➔ 局勢回穩後主力認錯連續回補 ➔ 股價剛站上均線起漲點。")
-
 def get_strategy_pool():
     pool = []
     for s in TW_STOCK_CONFIG.values():
@@ -409,13 +406,14 @@ def get_strategy_pool():
     return pool
 
 @st.cache_data(ttl=1800)
-def run_foreign_rebound_strategy():
+def run_dual_chip_strategies():
     strategy_pool = get_strategy_pool()
     url = "https://api.finmindtrade.com/api/v4/data"
     start_date = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
     end_date = datetime.now().strftime("%Y-%m-%d")
     
-    detected_stocks = []
+    first_root_stocks = []
+    heavy_selling_stocks = []
     
     for stock_id, name in strategy_pool:
         param = {
@@ -432,56 +430,98 @@ def run_foreign_rebound_strategy():
                     df_foreign['shares'] = (df_foreign['buy'] - df_foreign['sell']) / 1000  # 換算為張數
                     df_foreign = df_foreign.sort_values(by='date').reset_index(drop=True)
                     
-                    recent = df_foreign['shares'].iloc[-3:].tolist()
-                    previous = df_foreign['shares'].iloc[-9:-3].tolist()
+                    # 1. 籌碼切片定義
+                    today_chip = df_foreign['shares'].iloc[-1]
+                    yesterday_chip = df_foreign['shares'].iloc[-2]
+                    recent_3d = df_foreign['shares'].iloc[-3:].tolist()
+                    previous_6d = df_foreign['shares'].iloc[-8:-2].tolist()
+                    full_9d = df_foreign['shares'].iloc[-9:].tolist()
                     
-                    # 篩選條件：洗盤期賣超天數 >= 3天 且 近3天至少2天回補 且 最新一天大買
-                    if sum(1 for x in previous if x < 0) >= 3 and sum(1 for x in recent if x > 0) >= 2 and recent[-1] > 0:
-                        # yfinance 股價防追高驗證
-                        hist = yf.Ticker(f"{stock_id}.TW").history(period="10d")
-                        if not hist.empty and len(hist) >= 5:
-                            curr_p = hist['Close'].iloc[-1]
-                            ma5 = hist['Close'].rolling(window=5).mean().iloc[-1]
+                    # 獲取價格基本資料
+                    hist = yf.Ticker(f"{stock_id}.TW").history(period="10d")
+                    if hist.empty or len(hist) < 5:
+                        continue
+                    curr_p = hist['Close'].iloc[-1]
+                    ma5 = hist['Close'].rolling(window=5).mean().iloc[-1]
+                    
+                    # ----------------------------------------------------------
+                    # 戰略 A：外資由賣轉買【第一根爆量認錯回補點】
+                    # ----------------------------------------------------------
+                    cond_sell_off_a = sum(1 for x in previous_6d if x < 0) >= 3
+                    cond_first_root = yesterday_chip <= 0 and today_chip > 0
+                    avg_prev_sell = sum(x for x in previous_6d if x < 0) / max(sum(1 for x in previous_6d if x < 0), 1)
+                    cond_momentum_a = today_chip > abs(avg_prev_sell) * 1.5
+                    
+                    if cond_sell_off_a and cond_first_root and cond_momentum_a:
+                        if curr_p >= ma5 and curr_p <= ma5 * 1.03:  # 剛站上5MA起漲區間
+                            first_root_stocks.append({
+                                "股票代號": stock_id, "公司名稱": name, "當前股價": f"{curr_p:.2f} 元",
+                                "今日外資轉買(張)": today_chip, "昨日外資賣超(張)": yesterday_chip,
+                                "洗盤期賣超高頻天數": f"{sum(1 for x in previous_6d if x < 0)} / 6 天"
+                            })
                             
-                            # 價格在 5MA 上下 5% 內，屬於起漲區間
-                            if curr_p >= ma5 * 0.98 and curr_p <= ma5 * 1.05:
-                                detected_stocks.append({
-                                    "股票代號": stock_id,
-                                    "公司名稱": name,
-                                    "當前股價": f"{curr_p:.2f} 元",
-                                    "近3日外資累積回補(張)": sum(recent),
-                                    "今日外資買超(張)": recent[-1],
-                                    "洗盤期賣超高頻天數": f"{sum(1 for x in previous if x < 0)} / 6 天"
-                                })
+                    # ----------------------------------------------------------
+                    # 戰略 B：外資【持續避險提款、尚未認錯】風險警示池
+                    # ----------------------------------------------------------
+                    # 條件：近 9 天內有 6 天以上是賣超，且近 3 天「天天都在賣」或累積賣超極重，完全沒有收手跡象
+                    cond_persistent_sell = sum(1 for x in full_9d if x < 0) >= 6
+                    cond_no_rebound = sum(1 for x in recent_3d if x < 0) == 3 or (sum(recent_3d) < 0 and today_chip < 0)
+                    
+                    if cond_persistent_sell and cond_no_rebound:
+                        heavy_selling_stocks.append({
+                            "股票代號": stock_id, "公司名稱": name, "當前股價": f"{curr_p:.2f} 元",
+                            "近3日遭提款累積(張)": sum(recent_3d), "今日外資續賣(張)": today_chip,
+                            "波段提款密集度": f"{sum(1 for x in full_9d if x < 0)} / 9 天"
+                        })
         except: pass
-    return pd.DataFrame(detected_stocks)
+    return pd.DataFrame(first_root_stocks), pd.DataFrame(heavy_selling_stocks)
 
-df_strategy_res = run_foreign_rebound_strategy()
+df_strat_first, df_strat_sellout = run_dual_chip_strategies()
 
-if not df_strategy_res.empty:
-    st.success(f"🔥 系統成功揪出 {len(df_strategy_res)} 檔符合『洗盤結束、外資強力認錯回補』的黃金潛力股！")
-    
-    # 建立漂亮的可視化呈現
-    col_table, col_chart = st.columns([3, 2])
-    with col_table:
-        # 複製一份轉換給表格顯示
-        df_disp_strat = df_strategy_res.copy()
-        df_disp_strat['近3日外資累積回補(張)'] = df_disp_strat['近3日外資累積回補(張)'].apply(lambda x: f"+{x:,.0f} 張")
-        df_disp_strat['今日外資買超(張)'] = df_disp_strat['今日買超(張)'] = df_disp_strat['今日外資買超(張)'].apply(lambda x: f"+{x:,.0f} 張")
-        st.dataframe(df_disp_strat, use_container_width=True, hide_index=True)
-        
-    with col_chart:
-        fig_strat = go.Figure(go.Bar(
-            x=df_strategy_res['公司名稱'],
-            y=df_strategy_res['近3日外資累積回補(張)'],
-            marker_color='#ff4b4b',
-            text=df_strategy_res['近3日外資累積回補(張)'].apply(lambda x: f"{x:,.0f}張"),
-            textposition='auto'
-        ))
-        fig_strat.update_layout(title="核心池近 3 日外資回補力道對比", height=240, margin=dict(l=10, r=10, t=30, b=10))
-        st.plotly_chart(fig_strat, use_container_width=True, key="strategy_chart")
-else:
-    st.info("ℹ️ 策略掃描完成：目前核心池 28 檔標的中，暫無股票剛好符合『外資洗盤後、近 3 日剛反轉猛烈回補』的起漲臨界點，系統將隨盤勢動態持續追蹤。")
+# 網頁前端排版展示
+strat_tab1, strat_tab2 = st.tabs([
+    "🎯 策略一：外資洗盤後『由賣轉買・第一根認錯表態點』", 
+    "⚠️ 策略二：外資避險瘋狂提款『持續殺盤・尚未認錯』警示池"
+])
+
+with strat_tab1:
+    st.markdown("#### 🚀 剛出爐！外資由賣轉買第一根起漲點")
+    if not df_strat_first.empty:
+        col_t1, col_c1 = st.columns([3, 2])
+        with col_t1:
+            df_disp1 = df_strat_first.copy()
+            df_disp1['今日外資轉買(張)'] = df_disp1['今日外資轉買(張)'].apply(lambda x: f"+{x:,.0f} 張")
+            df_disp1['昨日外資賣超(張)'] = df_disp1['昨日外資賣超(張)'].apply(lambda x: f"{x:,.0f} 張")
+            st.dataframe(df_disp1, use_container_width=True, hide_index=True)
+        with col_c1:
+            fig1 = go.Figure(go.Bar(
+                x=df_strat_first['公司名稱'], y=df_strat_first['今日外資轉買(張)'],
+                marker_color='#ff4b4b', text=df_strat_first['今日外資轉買(張)'].apply(lambda x: f"+{x:,.0f}張"), textposition='auto'
+            ))
+            fig1.update_layout(title="第一根買回主力敲進張數排行", height=230, margin=dict(l=10, r=10, t=30, b=10))
+            st.plotly_chart(fig1, use_container_width=True, key="strat1_chart")
+    else:
+        st.info("ℹ️ 目前核心標的中，暫無股票精準符合『昨日賣、今日第一天剛轉大買』的黃金轉折第一根臨界點。")
+
+with strat_tab2:
+    st.markdown("#### 🚨 警惕！外資持續當作提款機、完全未見認錯回補的個股")
+    if not df_strat_sellout.empty:
+        col_t2, col_c2 = st.columns([3, 2])
+        with col_t2:
+            df_disp2 = df_strat_sellout.copy()
+            df_disp2['近3日遭提款累積(張)'] = df_disp2['近3日遭提款累積(張)'].apply(lambda x: f"{x:,.0f} 張")
+            df_disp2['今日外資續賣(張)'] = df_disp2['今日外資續賣(張)'].apply(lambda x: f"{x:,.0f} 張")
+            st.dataframe(df_disp2, use_container_width=True, hide_index=True)
+        with col_c2:
+            # 賣超用絕對值畫正向條形圖，但顏色用綠色代表流出
+            fig2 = go.Figure(go.Bar(
+                x=df_strat_sellout['公司名稱'], y=df_strat_sellout['近3日遭提款累積(張)'].abs(),
+                marker_color='#00f574', text=df_strat_sellout['近3日遭提款累積(張)'].apply(lambda x: f"{x:,.0f}張"), textposition='auto'
+            ))
+            fig2.update_layout(title="近 3 日外資提款失血量排行 (張)", height=230, margin=dict(l=10, r=10, t=30, b=10))
+            st.plotly_chart(fig2, use_container_width=True, key="strat2_chart")
+    else:
+        st.success("🟢 傲人表現！目前監控池內的所有個股，皆無落入『外資密集高頻率連續殺盤』的重災區。")
 
 # ==============================================================================
 # 十、網頁定時自動循環刷新機制
