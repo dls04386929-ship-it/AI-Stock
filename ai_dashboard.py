@@ -335,12 +335,12 @@ st.markdown("---")
 view_tab1, view_tab2, view_tab3 = st.tabs([
     "🇹🇼 觀測站一：台股主流板塊鏈與核心觀測池", 
     "📈 觀測站二：台指期五關多空交易決策導航儀",
-    "🎯 觀測站三：全市場【大戶+研發+合約負債+月營收】放寬型任意3指標量化選股終端"
+    "🎯 觀測站三：全市場【大戶+研發+合約負債+月營收】放寬型任意2指標量化選股終端"
 ])
 
 # ---- Tab 1: 焦點核心池板塊顯示 ----
 with view_tab1:
-    col_layout1, col_layout2 = st.columns([3, 2])
+    col_layout1, col_layout2 = st.columns([2, 1])
     with col_layout1:
         st.markdown(f"### 🚀 台股強勢主流板塊觀測台 (細項分秒快照)")
         if not df_tw.empty:
