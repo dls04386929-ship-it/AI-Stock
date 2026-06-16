@@ -611,57 +611,65 @@ st.sidebar.warning(
 # ==============================================================================
 # 十二、新增：電子股量化選股引擎 (與現有程序無縫整合)
 # ==============================================================================
-st.markdown("### 📈 電子股量化自動監控與篩選 (每 60 秒自動循環 50 筆)")
+import streamlit as st
+import pandas as pd
+import requests
+import time
 
+@st.cache_data(ttl=3600)
+def get_electronics_pool():
+    # 1. 抓取全市場股票資訊
+    url = "https://api.finmindtrade.com/api/v4/data"
+    params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
+    res = requests.get(url, params=params).json()
+    df_all = pd.DataFrame(res['data'])
+    
+    # 2. 篩選電子產業 (半導體、電腦、電子零件、網通)
+    electronics = df_all[df_all['industry'].str.contains('半導體|電子|電腦|通訊', na=False)]
+    return electronics['stock_id'].unique().tolist()
+
+def fetch_real_data(stock_id):
+    """
+    此處為邏輯框架，需串接 FinMind 對應 dataset
+    """
+    # 範例模擬真實數值計算 (請替換為實際 API 運算)
+    return {
+        "大戶增": 1.25,        # 範例：千張大戶持股比率變化 %
+        "研發增": 5.8,         # 範例：研發費用成長率 %
+        "合約負債增": 12.3,    # 範例：合約負債成長率 %
+        "月營收雙增": 8.9      # 範例：綜合成長指標 %
+    }
+
+st.markdown("### 🔍 電子股量化自動監控與篩選 (全市場動態掃描)")
+
+# 初始化批次
 if 'batch_index' not in st.session_state:
     st.session_state.batch_index = 0
 
-def fetch_real_quant_data(stock_id):
-    """取得四項真實指標數據"""
-    # 這裡實作邏輯：呼叫 FinMind API 取得資料並運算
-    # 實際運作時，請將回傳值替換為真正的 API 判斷邏輯
-    try:
-        # 指標1: 大戶增 (範例)
-        big_inc = True 
-        # 指標2: 研發增 (範例)
-        rd_inc = True 
-        # 指標3: 合約負債增 (範例)
-        contract_inc = True 
-        # 指標4: 月營收雙增 (範例)
-        rev_inc = True
-        return big_inc, rd_inc, contract_inc, rev_inc
-    except:
-        return False, False, False, False
-
-# 模擬電子股代號列表
-electronics_pool = ["2330", "2317", "2454", "2303", "2308", "2382", "2357"] # 應擴充至全電子股
-batch_stocks = electronics_pool[st.session_state.batch_index : st.session_state.batch_index + 50]
+all_stocks = get_electronics_pool()
+batch_stocks = all_stocks[st.session_state.batch_index : st.session_state.batch_index + 50]
 
 data_list = []
 for sid in batch_stocks:
-    b, r, c, m = fetch_real_quant_data(sid)
-    data_list.append({
-        "股票代號": sid, "大戶增": b, "研發增": r, "合約負債增": c, "月營收雙增": m
-    })
+    metrics = fetch_real_data(sid)
+    data_list.append({"股票代號": sid, **metrics})
 
 df_quant = pd.DataFrame(data_list)
 
-# 顯示表格並加入顏色指標
-def color_bool(val):
-    return 'background-color: #008000' if val else 'background-color: #8B0000'
+# 定義顯示樣式：正數顯示綠色背景，負數顯示紅色
+def color_val(val):
+    color = '#008000' if val >= 0 else '#8B0000'
+    return f'background-color: {color}; color: white'
 
+# 使用 style.map (適用於新版 Pandas)
 st.dataframe(
-    df_quant.style.map(color_bool, subset=['大戶增', '研發增', '合約負債增', '月營收雙增']),
+    df_quant.style.map(color_val, subset=['大戶增', '研發增', '合約負債增', '月營收雙增']),
     use_container_width=True
 )
 
 if st.button("手動刷新批次"):
-    st.session_state.batch_index = (st.session_state.batch_index + 50) % len(electronics_pool)
+    st.session_state.batch_index = (st.session_state.batch_index + 50) % len(all_stocks)
     st.rerun()
-
-# 60秒自動刷新邏輯 (延續原程序)
-time.sleep(60)
-st.rerun()
 
 # ==============================================================================
 # 十一、網頁定時自動循環刷新機制
