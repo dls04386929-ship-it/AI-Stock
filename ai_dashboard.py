@@ -626,7 +626,7 @@ def get_real_metrics(stock_id):
         "start_date": (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
     }
     
-    try:
+
 # 修改後的除錯偵測範例
 response = requests.get(url, params=params, timeout=5).json()
 if response.get("data"):
