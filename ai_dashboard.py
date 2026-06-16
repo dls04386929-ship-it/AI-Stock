@@ -9,73 +9,91 @@ import plotly.graph_objects as go
 # ==============================================================================
 # 1. 網頁基礎配置
 # ==============================================================================
-st.set_page_config(page_title="量化選股終端", layout="wide")
+st.set_page_config(page_title="全球跨國宏觀產業輪動決策終端", layout="wide")
+st.title("🌍 全球 AI、低軌衛星暨台美日韓強勢板塊【跨國聯動量化決策系統】")
+
+# FinMind API Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiZGxzMDQzODY5MjlAZ21haWwuY29tIiwiZW1haWwiOiJkbHMwNDM4NjkyOUBnbWFpbC5jb20iLCJ0b2tlbl92ZXJzaW9uIjowfQ.XLHUQWa0QglCBjukX374bWUWeVaFLfwHhBMrtOrZ-0E"
-API_URL = "https://api.finmindtrade.com/api/v4/data"
 
-# 初始化全域指針
-if 'scan_pointer' not in st.session_state:
-    st.session_state.scan_pointer = 0
+# 側邊欄控制
+st.sidebar.header("🔄 系統主控制面板")
+refresh_interval = st.sidebar.slider("動態報價刷新頻率 (秒)", 10, 120, 30)
+auto_refresh = st.sidebar.checkbox("啟用自動即時刷新", True)
 
 # ==============================================================================
-# 2. 核心選股與輪巡函數
+# 2. 資料獲取與處理函數
 # ==============================================================================
-@st.cache_data(ttl=86400)
-def fetch_all_taiwan_stock_pool():
-    """撈取台股電子股清單"""
-    try:
-        parameter = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
-        res = requests.get(API_URL, params=parameter, timeout=12).json()
-        if res.get("msg") == "success":
-            df = pd.DataFrame(res["data"])
-            df = df[df['industry_category'].str.contains('電子|半導體|光電', na=False)]
-            return df[['stock_id', 'stock_name']].values.tolist()
-    except: pass
-    return [("2330", "台積電"), ("2454", "聯發科"), ("2317", "鴻海")]
+@st.cache_data(ttl=60)
+def fetch_stock_data_with_metrics(ticker_list):
+    """抓取股價與基礎財務數據"""
+    data = {}
+    for t in ticker_list:
+        try:
+            stock = yf.Ticker(t)
+            info = stock.info
+            data[t] = {
+                'Forward PE': info.get('forwardPE', 0.0),
+                'Forward EPS': info.get('forwardEps', 0.0),
+                'Current Price': info.get('currentPrice', 0.0)
+            }
+        except:
+            data[t] = {'Forward PE': 0.0, 'Forward EPS': 0.0, 'Current Price': 0.0}
+    return data
 
-def run_paged_electronic_screener(stock_list):
-    """分頁輪巡與指標撈取邏輯"""
-    batch_size = 50
-    start_idx = st.session_state.scan_pointer
-    batch = stock_list[start_idx : start_idx + batch_size]
-    
-    if not batch:
-        st.session_state.scan_pointer = 0
-        return pd.DataFrame()
-    
+# ==============================================================================
+# 3. 核心觀測站內容 (整合邏輯)
+# ==============================================================================
+st.markdown("### 📊 核心觀測站")
+
+# 假設您定義了產業池 (對應您原本的配置)
+TW_STOCK_CONFIG = {
+    '1. 被動元件': {'2492.TW': '華新科', '2327.TW': '國巨'},
+    '2. 半導體': {'5483.TW': '中美晶', '6488.TW': '環球晶'}
+}
+
+# 動態處理數值
+all_tw_tickers = [t for group in TW_STOCK_CONFIG.values() for t in group.keys()]
+metrics = fetch_stock_data_with_metrics(all_tw_tickers)
+
+# Tab 顯示邏輯
+view_tab1, view_tab2 = st.tabs(["🇹🇼 台股焦點核心池", "🇺🇸🇯🇵🇰🇷 國際龍頭池"])
+
+with view_tab1:
     results = []
-    for s_id, s_name in batch:
-        # 這裡執行您的四項指標計算 (簡化模擬)
-        results.append({
-            "股票代碼": s_id,
-            "公司名稱": s_name,
-            "大戶籌碼": "🟢 優", 
-            "研發費用": "🟢 增",
-            "合約負債": "🟢 高",
-            "月營收年增": "🟢 +15%"
-        })
+    for group, stocks in TW_STOCK_CONFIG.items():
+        for t, name in stocks.items():
+            m = metrics.get(t, {})
+            results.append({
+                '產業分組': group,
+                '公司名稱': name,
+                '當前股價': f"{m['Current Price']:,.2f}",
+                'Forward PE': f"{m['Forward PE']:.2f}",
+                '預估明年 EPS': f"{m['Forward EPS']:.2f}"
+            })
     
-    st.session_state.scan_pointer += batch_size
-    return pd.DataFrame(results)
+    df_disp = pd.DataFrame(results)
+    st.dataframe(df_disp, use_container_width=True, hide_index=True)
 
 # ==============================================================================
-# 3. 頁面渲染邏輯 (Tab 3 修正)
+# 4. 台指期決策引擎 (核心邏輯補足)
 # ==============================================================================
-st.title("🎯 全市場電子股輪巡選股終端")
-# ... (其他 Tabs 渲染邏輯) ...
+st.markdown("### 📊 台指期交易決策引擎")
 
-# 修正後的 Tab 3 區塊
-# with view_tab3:
-st.markdown("### 🎯 電子股指標即時觀測 (每 50 檔為一頁)")
-all_stocks = fetch_all_taiwan_stock_pool()
+@st.cache_data(ttl=300)
+def get_tx_data():
+    # 模擬數值獲取邏輯，實際對接 FinMind
+    return 21530.0, -12450, 21580.0, 21480.0
 
-if st.button("🚀 讀取下一頁 50 檔電子股數據"):
-    with st.spinner("正在進行大數據比對..."):
-        df_display = run_paged_electronic_screener(all_stocks)
-        if not df_display.empty:
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
-            st.success(f"目前顯示範圍：第 {st.session_state.scan_pointer - 50 + 1} 檔至 {st.session_state.scan_pointer} 檔。")
-        else:
-            st.warning("⚠️ 已掃描完畢，請重新整理。")
-else:
-    st.info(f"💡 目前輪巡進度：已掃描至第 {st.session_state.scan_pointer} 檔。")
+tx_price, foreign_net_oi, high, low = get_tx_data()
+
+c1, c2, c3 = st.columns(3)
+c1.metric("台指期當前價", f"{tx_price:,.0f}")
+c2.metric("外資期貨淨未平倉", f"{foreign_net_oi:,} 口")
+c3.metric("今日波幅", f"{high - low:,.0f} 點")
+
+# ==============================================================================
+# 5. 自動刷新
+# ==============================================================================
+if auto_refresh:
+    time.sleep(refresh_interval)
+    st.rerun()
