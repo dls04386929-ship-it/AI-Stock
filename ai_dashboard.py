@@ -232,58 +232,73 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度全市場選股引擎 (精準瞄準台股『所有電子產業板塊』，符合任意 2 項以上即入榜)
+# 七、深度全市場選股引擎 (精準瞄準電子股 + 50檔動態分組輪巡 + 60秒冷卻機制)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
-    """精準動態調閱全台股上市櫃公司，透過產業別交叉過濾，僅提取『電子產業』個股建立池"""
+    """動態調閱全台股清單，僅提取電子產業相關板塊個股"""
     try:
         parameter = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
         res = requests.get(API_URL, params=parameter, timeout=12).json()
         if res.get("msg") == "success" and len(res.get("data", [])) > 0:
             df_info = pd.DataFrame(res["data"])
-            # 安全過濾：確保為上市櫃普通股
             df_filtered = df_info[df_info['type'].isin(['stock', 'twse', 'tpex'])]
-            
-            # 【電子股精準瞄準核心】：利用產業別(industry_category)鎖定所有電子板塊
-            # 涵蓋：半導體、電腦週邊、光電、通信網路、電子零組件、電子通路、資訊服務、其他電子
+            # 鎖定所有電子股板塊
             df_electronics = df_filtered[df_filtered['industry_category'].str.contains('電子|半導體|光電|通信|資訊服務', na=False, case=False)]
-            
             if not df_electronics.empty:
                 return df_electronics[['stock_id', 'stock_name']].values.tolist()
-    except: 
-        pass
-    # 降級備用安全防護池（皆為核心強勢電子標的）
-    return [("2330", "台積電"), ("2454", "聯發科"), ("2317", "鴻海"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶"), ("3035", "智原"), ("4919", "新唐")]
+    except: pass
+    return [("2330", "台積電"), ("2454", "聯發科"), ("2317", "鴻海"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶")]
 
-@st.cache_data(ttl=28800) # 快取保留 8 小時
+# 初始化 Streamlit 輪巡狀態機
+if 'scan_pointer' not in st.session_state:
+    st.session_state.scan_pointer = 0
+if 'accumulated_black_horses' not in st.session_state:
+    st.session_state.accumulated_black_horses = []
+
 def run_relaxed_fundamental_screener(stock_list_pool):
-    # 防護型時間平移，完美覆蓋至少兩季以上的完整財報三表，防止時間斷層
     start_financial = (datetime.now() - timedelta(days=550)).strftime("%Y-%m-%d")
     start_chip = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
-    qualified_output = []
     
-    # 調配電子股掃描深度（設定為 150 檔，兼顧全電子股代表性與 API 流量熔斷安全防護）
-    max_scan_depth = min(len(stock_list_pool), 150) 
+    # 每次精準切割 50 檔進行掃描
+    batch_size = 50
+    current_idx = st.session_state.scan_pointer
+    target_batch = stock_list_pool[current_idx : current_idx + batch_size]
     
-    for idx in range(max_scan_depth):
-        stock_id, stock_name = stock_list_pool[idx]
+    if not target_batch:
+        st.success("🎉 全市場電子股已全部掃描完畢！已重置進度。")
+        st.session_state.scan_pointer = 0
+        st.session_state.accumulated_black_horses = []
+        return pd.DataFrame()
+
+    st.info(f"⚡ 正在動態掃描電子股第 {current_idx + 1} 至 {min(current_idx + batch_size, len(stock_list_pool))} 檔 (總計: {len(stock_list_pool)} 檔)...")
+    
+    # 用於動態顯示畫面的進度條與日誌容器
+    progress_bar = st.progress(0)
+    status_log = st.empty()
+    
+    new_qualified_output = []
+    
+    for idx, (stock_id, stock_name) in enumerate(target_batch):
+        # 更新動態進度條
+        progress_bar.progress((idx + 1) / len(target_batch))
+        status_log.text(f"🔍 正在交叉分析基本面轉折: {stock_id} {stock_name}...")
+        
         try:
             score = 0
             metric_details = {"大戶籌碼": "❌ 未達標", "研發投入": "❌ 未達標", "合約負債": "❌ 未達標", "月營收表現": "❌ 未達標", "val_cl": 0.0}
             
-            # 【1. 月營收轉折驗證】
+            # 1. 驗證月營收
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=3).json()
             if r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 1:
                 df_rev = pd.DataFrame(r_rev["data"]).sort_values(by='date')
                 l_rev = df_rev.iloc[-1]
-                # 電子股基本面轉折：月增率 > 0 或 年增率 > -5% (產業谷底復甦)
                 if l_rev['revenue_month_growth_rate'] > 0 or l_rev['revenue_year_growth_rate'] > -5:
                     score += 1
                     metric_details["月營收表現"] = f"🟢 績優 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
                     
-            # 【2 & 3. 財報三表（研發與合約負債）驗證】
+            # 2 & 3. 驗證研發與合約負債
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_fs = requests.get(API_URL, params=p_fs, timeout=3).json()
             if r_fs.get("msg") == "success" and len(r_fs.get("data", [])) > 0:
@@ -291,13 +306,10 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 df_rd = df_fs[df_fs['type'].str.contains('Research and development|研發', case=False, na=False)].sort_values(by='date')
                 df_cl = df_fs[df_fs['type'].str.contains('Contract liabilities|合約負債', case=False, na=False)].sort_values(by='date')
                 
-                # 研發費用：電子股的命脈！最新一季研發不縮水（維持在前季 90% 以上）即視為持續投入
                 if not df_rd.empty and len(df_rd) >= 2:
                     if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.90: 
                         score += 1
                         metric_details["研發投入"] = "🟢 持續擴大"
-                
-                # 合約負債：電子建置與晶片在手訂單指標，最新一季大於或持平前一季的 95% 即過關
                 if not df_cl.empty and len(df_cl) >= 2:
                     val_now = df_cl.iloc[-1]['value']
                     val_prev = df_cl.iloc[-2]['value']
@@ -306,7 +318,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                         score += 1
                         metric_details["合約負債"] = f"🟢 高檔 ({val_now/100000000:.2f}億)"
                         
-            # 【4. 千張大戶籌碼驗證】
+            # 4. 驗證千張大戶籌碼
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
             r_cp = requests.get(API_URL, params=p_cp, timeout=3).json()
             if r_cp.get("msg") == "success" and len(r_cp.get("data", [])) > 0:
@@ -315,25 +327,42 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 if not df_1000.empty and len(df_1000) >= 2:
                     c_pct = df_1000.iloc[-1]['percent']
                     p_pct = df_1000.iloc[-2]['percent']
-                    # 大戶籌碼鎖定：最新一週籌碼未渙散（高於或等於上週持股比重之 99% 以上）
                     if c_pct >= p_pct * 0.99: 
                         score += 1
                         metric_details["大戶籌碼"] = f"🟢 穩固 ({c_pct:.1f}%)"
                         
-            # 【核心修正點】：只要滿足上述任意 2 個或以上指標，即判定為電子轉折股，精準納入黑馬榜
+            # 門檻放寬：符合任意 2 項指標或以上即可入榜
             if score >= 2:
-                qualified_output.append({
+                new_qualified_output.append({
                     "股票代碼": stock_id, "公司名稱": stock_name, "符合指標數": f"🔥 {score}/4 獲選",
                     "大戶籌碼變動": metric_details["大戶籌碼"], "研發開支狀態": metric_details["研發投入"],
                     "最新合約負債": f"{metric_details['val_cl']:.2f} 億", "月營收表現": metric_details["月營收表現"],
                     "純數字合約負債": metric_details["val_cl"]
                 })
-                
-            # 安全間隔：每執行完一檔個股，微幅歇停 0.1 秒，確保 150 檔高強度掃描不會觸發 API 封鎖機制
-            time.sleep(0.1)
-        except: 
-            pass
-    return pd.DataFrame(qualified_output)
+            time.sleep(0.1) # 基礎安全間隔
+        except: pass
+        
+    status_log.empty()
+    
+    # 整合並更新狀態機資料
+    st.session_state.accumulated_black_horses.extend(new_qualified_output)
+    st.session_state.scan_pointer += batch_size
+    
+    # 建立冷卻與下一波提醒介面
+    st.success(f"等候機制觸發：本組 50 檔已動態掃描完畢，目前累計篩選出 {len(st.session_state.accumulated_black_horses)} 隻黑馬股。")
+    
+    # 用計時器實作 60 秒冷卻倒數動態顯示，不鎖死網頁
+    countdown_placeholder = st.empty()
+    for remaining in range(60, 0, -1):
+        countdown_placeholder.warning(f"⏳ 遵照伺服器防禦紀律：冷卻保護中... 將於 {remaining} 秒後解鎖下一組 50 檔電子股掃描。")
+        time.sleep(1)
+    countdown_placeholder.success("✅ 冷卻完畢！下一組 50 檔雷達已就緒，請點擊下方按鈕繼續掃描。")
+    
+    # 觸發重新整理按鈕
+    if st.button("🚀 立即啟動下一組 50 檔電子股深層掃描", key="next_batch_trigger"):
+        st.rerun()
+        
+    return pd.DataFrame(st.session_state.accumulated_black_horses)
 
 # ==============================================================================
 # 八、今日台股主流板塊輪動強弱榜
