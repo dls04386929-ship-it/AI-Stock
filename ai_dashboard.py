@@ -158,7 +158,6 @@ if not idx_market_data.empty:
     cols = st.columns(len(index_tickers))
     for idx, t in enumerate(index_tickers):
         try:
-            # 移除全局 dropna()，改單獨獲取
             if ('Close', t) in idx_market_data.columns:
                 close_s = idx_market_data['Close'][t].dropna()
                 if not close_s.empty:
@@ -177,7 +176,7 @@ if not idx_market_data.empty:
 st.markdown("---")
 
 # ==============================================================================
-# 五、兩大觀測站的資料庫配置
+# 五、兩大觀測站的資料庫配置 (完整收錄 27 檔標的 + 2489 瑞軒)
 # ==============================================================================
 TW_STOCK_CONFIG = {
     '被動元件聚落': {
@@ -190,9 +189,9 @@ TW_STOCK_CONFIG = {
         '6488.TW': '環球晶', '5483.TW': '中美晶', '6182.TW': '合晶', '3532.TW': '台勝科',
         '3016.TW': '嘉晶', '2338.TW': '光罩', '6139.TW': '亞翔'
     },
-    '記憶體與IC設計': {
+    '記憶體、IC設計與光電': {
         '2344.TW': '華邦電', '4973.TW': '廣穎', '3035.TW': '智原', '4919.TW': '新唐',
-        '2401.TW': '凌陽', '8096.TW': '擎亞'
+        '2401.TW': '凌陽', '8096.TW': '擎亞', '2489.TW': '瑞軒'
     },
     '光學鏡頭與光通訊': {
         '3008.TW': '大立光', '3406.TW': '玉晶光', '3362.TW': '先進光', '4979.TW': '華星光'
@@ -231,7 +230,7 @@ GLOBAL_STOCK_CONFIG = {
 }
 
 # ==============================================================================
-# 六、大數據動態運算引擎 (核心修正：台美股管道抽離、移除全局 dropna)
+# 六、大數據動態運算引擎
 # ==============================================================================
 @st.cache_data(ttl=15)
 def process_all_market_intelligence():
@@ -240,7 +239,6 @@ def process_all_market_intelligence():
     global_tickers = []
     for s in GLOBAL_STOCK_CONFIG.values(): global_tickers.extend(s.keys())
     
-    # 核心修復：台股與海外股分批下載，避免跨時區對齊時相互將資料覆蓋為 NaN
     try:
         tw_data = yf.download(tw_tickers, period='1d', interval='1m', progress=False)
     except:
@@ -254,7 +252,6 @@ def process_all_market_intelligence():
     tw_results = []
     tw_rotation = []
     
-    # 1. 處理台股數據
     if not tw_data.empty:
         for group, stocks in TW_STOCK_CONFIG.items():
             group_pcts = []
@@ -273,7 +270,7 @@ def process_all_market_intelligence():
                             
                             tw_results.append({
                                 '產業分組': group, '代號': t, '公司名稱': name, '當前股價': curr,
-                                '今日漲跌幅': pct, 'Forward PE': None, '預估明年 EPS': None # 移除 PE 請求降低被鎖機率
+                                '今日漲跌幅': pct, 'Forward PE': None, '預估明年 EPS': None
                             })
                 except: pass
             if group_pcts:
@@ -283,7 +280,6 @@ def process_all_market_intelligence():
                     '上漲家數比': f"{up_c}/{len(group_pcts)} ({int(up_c/len(group_pcts)*100)}%)"
                 })
                 
-    # 2. 處理美日韓數據
     global_results = []
     if not global_data.empty:
         for group, stocks in GLOBAL_STOCK_CONFIG.items():
@@ -308,7 +304,7 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、今日台股資金輪動即時量化看板 (全面配置動態判斷：+紅、-綠)
+# 七、今日台股資金輪動即時量化看板
 # ==============================================================================
 st.markdown("### 🔥 今日台股主流板塊輪動強弱榜")
 if not df_tw_rot.empty:
@@ -350,7 +346,7 @@ st.markdown("---")
 # ==============================================================================
 # 八、雙戰略觀測站分頁展示
 # ==============================================================================
-view_tab1, view_tab2 = st.tabs(["🇹🇼 觀測站一：台股強勢板塊鏈觀測站 (27檔焦點股)", "🇺🇸🇯🇵🇰🇷 觀測站二：美日韓對應產業國際龍頭觀測站"])
+view_tab1, view_tab2 = st.tabs(["🇹🇼 觀測站一：台股強勢板塊鏈觀測站 (焦點核心池)", "🇺🇸🇯🇵🇰🇷 觀測站二：美日韓對應產業國際龍頭觀測站"])
 
 with view_tab1:
     st.markdown(f"### 🚀 台股強勢主流板塊觀測台 (數據刷新時間: {datetime.now().strftime('%H:%M:%S')})")
@@ -374,7 +370,7 @@ with view_tab1:
                 fig.update_layout(height=240, margin=dict(l=10, r=10, t=10, b=10))
                 st.plotly_chart(fig, use_container_width=True, key=f"tw_chart_{i}")
     else:
-        st.warning("⚠️ 提示：正在向 Yahoo Finance 動態排隊獲取台股最新分時報價中，或目前為非開盤時段。請稍候數秒並重新整理。")
+        st.warning("⚠️ 提示：正在向 Yahoo Finance 動態排隊獲取台股最新分時報價中。")
 
 with view_tab2:
     st.markdown("### 🏆 全球美、日、韓產業鏈頂級龍頭鏡像對比面板")
@@ -396,11 +392,99 @@ with view_tab2:
                 ))
                 fig.update_layout(height=240, margin=dict(l=10, r=10, t=10, b=10))
                 st.plotly_chart(fig, use_container_width=True, key=f"gl_chart_{i}")
-    else:
-        st.info("💡 提示：國際龍頭個股動態資料加載中。")
+
+st.markdown("---")
 
 # ==============================================================================
-# 九、網頁定時自動循環刷新機制
+# 九、新功能：外資避險洗盤後「認錯回補」策略量化引擎 (置於最下方)
+# ==============================================================================
+st.markdown("### 🎯 師傅傳授：外資避險洗盤後『認錯回補』起漲訊號點")
+st.caption("策略邏輯：國際震盪、個股無利空時外資避險洗盤出脫(洗散戶) ➔ 局勢回穩後主力認錯連續回補 ➔ 股價剛站上均線起漲點。")
+
+def get_strategy_pool():
+    pool = []
+    for s in TW_STOCK_CONFIG.values():
+        for k in s.keys():
+            pool.append((k.split('.')[0], s[k]))
+    return pool
+
+@st.cache_data(ttl=1800)
+def run_foreign_rebound_strategy():
+    strategy_pool = get_strategy_pool()
+    url = "https://api.finmindtrade.com/api/v4/data"
+    start_date = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    
+    detected_stocks = []
+    
+    for stock_id, name in strategy_pool:
+        param = {
+            "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+            "data_id": stock_id, "start_date": start_date, "end_date": end_date, "token": FINMIND_TOKEN
+        }
+        try:
+            res = requests.get(url, params=param, timeout=5)
+            data = res.json()
+            if data.get("msg") == "success" and len(data.get("data", [])) > 0:
+                df = pd.DataFrame(data["data"])
+                df_foreign = df[df['name'] == 'Foreign_Investor'].copy()
+                if not df_foreign.empty and len(df_foreign) >= 8:
+                    df_foreign['shares'] = (df_foreign['buy'] - df_foreign['sell']) / 1000  # 換算為張數
+                    df_foreign = df_foreign.sort_values(by='date').reset_index(drop=True)
+                    
+                    recent = df_foreign['shares'].iloc[-3:].tolist()
+                    previous = df_foreign['shares'].iloc[-9:-3].tolist()
+                    
+                    # 篩選條件：洗盤期賣超天數 >= 3天 且 近3天至少2天回補 且 最新一天大買
+                    if sum(1 for x in previous if x < 0) >= 3 and sum(1 for x in recent if x > 0) >= 2 and recent[-1] > 0:
+                        # yfinance 股價防追高驗證
+                        hist = yf.Ticker(f"{stock_id}.TW").history(period="10d")
+                        if not hist.empty and len(hist) >= 5:
+                            curr_p = hist['Close'].iloc[-1]
+                            ma5 = hist['Close'].rolling(window=5).mean().iloc[-1]
+                            
+                            # 價格在 5MA 上下 5% 內，屬於起漲區間
+                            if curr_p >= ma5 * 0.98 and curr_p <= ma5 * 1.05:
+                                detected_stocks.append({
+                                    "股票代號": stock_id,
+                                    "公司名稱": name,
+                                    "當前股價": f"{curr_p:.2f} 元",
+                                    "近3日外資累積回補(張)": sum(recent),
+                                    "今日外資買超(張)": recent[-1],
+                                    "洗盤期賣超高頻天數": f"{sum(1 for x in previous if x < 0)} / 6 天"
+                                })
+        except: pass
+    return pd.DataFrame(detected_stocks)
+
+df_strategy_res = run_foreign_rebound_strategy()
+
+if not df_strategy_res.empty:
+    st.success(f"🔥 系統成功揪出 {len(df_strategy_res)} 檔符合『洗盤結束、外資強力認錯回補』的黃金潛力股！")
+    
+    # 建立漂亮的可視化呈現
+    col_table, col_chart = st.columns([3, 2])
+    with col_table:
+        # 複製一份轉換給表格顯示
+        df_disp_strat = df_strategy_res.copy()
+        df_disp_strat['近3日外資累積回補(張)'] = df_disp_strat['近3日外資累積回補(張)'].apply(lambda x: f"+{x:,.0f} 張")
+        df_disp_strat['今日外資買超(張)'] = df_disp_strat['今日買超(張)'] = df_disp_strat['今日外資買超(張)'].apply(lambda x: f"+{x:,.0f} 張")
+        st.dataframe(df_disp_strat, use_container_width=True, hide_index=True)
+        
+    with col_chart:
+        fig_strat = go.Figure(go.Bar(
+            x=df_strategy_res['公司名稱'],
+            y=df_strategy_res['近3日外資累積回補(張)'],
+            marker_color='#ff4b4b',
+            text=df_strategy_res['近3日外資累積回補(張)'].apply(lambda x: f"{x:,.0f}張"),
+            textposition='auto'
+        ))
+        fig_strat.update_layout(title="核心池近 3 日外資回補力道對比", height=240, margin=dict(l=10, r=10, t=30, b=10))
+        st.plotly_chart(fig_strat, use_container_width=True, key="strategy_chart")
+else:
+    st.info("ℹ️ 策略掃描完成：目前核心池 28 檔標的中，暫無股票剛好符合『外資洗盤後、近 3 日剛反轉猛烈回補』的起漲臨界點，系統將隨盤勢動態持續追蹤。")
+
+# ==============================================================================
+# 十、網頁定時自動循環刷新機制
 # ==============================================================================
 if auto_refresh:
     time.sleep(refresh_interval)
