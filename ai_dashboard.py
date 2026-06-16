@@ -602,48 +602,67 @@ with strat_tab2:
 
 # 🔍 補足：根據大戶反向心理學對話截圖額外生成的戰術看板
 st.sidebar.markdown("---")
-st.sidebar.subheader("💡 籌碼逆向心理學提醒")
-st.sidebar.warning(
-    "**逆向思考：** 圖片分析指出，當出現『千張大戶減少很多、股價反而上漲』的異常背離時，"
-    "通常是電視網路名嘴在喊利多掩護大戶出貨！反之，跌多時利空頻傳，往往是大戶在低位默默進貨。操作時切勿盲信散戶熱度的股票（如 2489 瑞軒歷史教訓）。"
-)
 
 # ==============================================================================
 # 十一、新增：量化選股與真實數據擷取引擎
 # ==============================================================================
 # ==============================================================================
-# 新增功能：2330.TW 昨日收盤完整資訊監測
+# 十二、2330.TW 深度基本面與籌碼監測引擎 (FinMind API 串接)
 # ==============================================================================
-st.markdown("### 🔍 2330.TW 台積電昨日收盤完整數據透視")
+st.markdown("### 💎 2330 台積電深度基本面與籌碼監測")
 
-def get_tsmc_yesterday_data():
-    try:
-        stock = yf.Ticker("2330.TW")
-        # 抓取最近的歷史資料
-        hist = stock.history(period="5d")
-        if not hist.empty:
-            # 取出最後一筆（通常是昨日收盤，若當日未收盤則為前日）
-            yesterday_data = hist.iloc[-1]
-            return yesterday_data
-        return None
-    except:
-        return None
-
-tsmc_data = get_tsmc_yesterday_data()
-
-if tsmc_data is not None:
-    # 將 Series 轉換為 DataFrame 以便顯示
-    df_tsmc = tsmc_data.to_frame(name="數值").reset_index()
-    df_tsmc.columns = ["欄位名稱", "對應數值"]
+@st.cache_data(ttl=3600)
+def fetch_2330_deep_data():
+    url = "https://api.finmindtrade.com/api/v4/data"
+    stock_id = "2330"
     
-    # 格式化數值以利閱讀
-    df_tsmc["對應數值"] = df_tsmc["對應數值"].apply(lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) else x)
+    # 1. 月營收
+    res_rev = requests.get(url, params={"dataset": "TaiwanStockMonthlyRevenue", "stock_id": stock_id, "token": FINMIND_TOKEN}).json()
+    df_rev = pd.DataFrame(res_rev.get("data", []))
     
-    st.dataframe(df_tsmc, use_container_width=True, hide_index=True)
-    st.caption("註：此資料來自 Yahoo Finance 盤後數據，包含開盤、最高、最低、收盤、成交量與股利拆分等資訊。")
-else:
-    st.warning("目前無法獲取台積電的歷史收盤資料，請檢查網路連線或 Yahoo Finance API 狀態。")
+    # 2. 財報 (研發費用 + 合約負債)
+    res_fin = requests.get(url, params={"dataset": "TaiwanStockFinancialStatements", "stock_id": stock_id, "token": FINMIND_TOKEN}).json()
+    df_fin = pd.DataFrame(res_fin.get("data", []))
+    
+    # 3. 大戶持股 (集保戶股權分散)
+    res_chip = requests.get(url, params={"dataset": "TaiwanStockHoldingSharesPer", "stock_id": stock_id, "token": FINMIND_TOKEN}).json()
+    df_chip = pd.DataFrame(res_chip.get("data", []))
+    
+    return df_rev, df_fin, df_chip
 
+# 執行抓取
+df_rev, df_fin, df_chip = fetch_2330_deep_data()
+
+# 資料處理與呈現
+col_f1, col_f2 = st.columns(2)
+
+with col_f1:
+    st.subheader("📈 營收與研發增長")
+    if not df_rev.empty:
+        # 顯示最新月營收年增率
+        latest_rev = df_rev.iloc[-1]
+        st.metric("最新月營收 (億)", f"{latest_rev['value']/100000000:.2f}", delta=f"{latest_rev.get('revenue_month_year_growth_rate', 0):.2f}%")
+    
+    if not df_fin.empty:
+        # 篩選研發費用 (這裡需根據實際 API 回傳的欄位名稱調整)
+        research_exp = df_fin[df_fin['type'] == '研究發展費用'].tail(1)
+        st.write("最新季度研發費用 (單位:元):", research_exp['value'].values[0] if not research_exp.empty else "N/A")
+
+with col_f2:
+    st.subheader("🛡️ 合約負債與大戶籌碼")
+    if not df_fin.empty:
+        # 篩選合約負債
+        contract_liab = df_fin[df_fin['type'] == '合約負債'].tail(1)
+        st.write("最新季度合約負債:", contract_liab['value'].values[0] if not contract_liab.empty else "N/A")
+        
+    if not df_chip.empty:
+        # 計算 1000 張以上大戶比例變化
+        big_holders = df_chip[df_chip['holding_shares_level'] == '1000以上'].tail(2)
+        if len(big_holders) >= 2:
+            pct_change = big_holders['percent'].diff().iloc[-1]
+            st.metric("1000張以上大戶持股比例變化", f"{pct_change:+.2f}%", delta_color="normal")
+
+st.info("💡 提示：以上數據由 FinMind API 定時更新。若顯示 N/A，請確認 API 欄位對照是否正確。")
 st.markdown("---")
 # ==============================================================================
 # 十二、網頁定時自動循環刷新機制
