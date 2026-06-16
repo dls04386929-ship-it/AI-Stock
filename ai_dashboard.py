@@ -651,7 +651,7 @@ def color_bool(val):
     return 'background-color: #008000' if val else 'background-color: #8B0000'
 
 st.dataframe(
-    df_quant.style.applymap(color_bool, subset=['大戶增', '研發增', '合約負債增', '月營收雙增']),
+    df_quant.style.map(color_bool, subset=['大戶增', '研發增', '合約負債增', '月營收雙增']),
     use_container_width=True
 )
 
