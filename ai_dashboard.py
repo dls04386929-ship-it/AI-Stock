@@ -13,7 +13,7 @@ st.set_page_config(page_title="全球跨國宏觀產業輪動決策終端", layo
 st.title("🌍 全球 AI、低軌衛星暨台美日韓強勢板塊【跨國聯動量化決策系統】")
 st.markdown("本系統全面整合：**操作紀律、全球總經、FinMind 盤後大戶籌碼、全球大盤即時監控、台股主流板塊輪動，以及『美日韓核心產業龍頭觀測站』**。")
 
-# FinMind API Token 
+# FinMind API Token
 FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiZGxzMDQzODY5MjlAZ21haWwuY29tIiwiZW1haWwiOiJkbHMwNDM4NjkyOUBnbWFpbC5jb20iLCJ0b2tlbl92ZXJzaW9uIjowfQ.XLHUQWa0QglCBjukX374bWUWeVaFLfwHhBMrtOrZ-0E"
 API_URL = "https://api.finmindtrade.com/api/v4/data"
 
@@ -61,36 +61,57 @@ with st.container():
 st.markdown("---")
 
 # ==============================================================================
-# 四、自動串接台灣本土財經 API 函數 (盤後法人大戶籌碼)
+# 四、自動串接台灣本土財經 API 函數 (功能修正：動態向前追溯有效交易日)
 # ==============================================================================
 def get_backup_chips_data():
     backup_buy = [{"排名": 1, "族群": "元宇宙", "大戶差 (億)": 360.9}, {"排名": 2, "族群": "5G手機", "大戶差 (億)": 358.9}, {"排名": 3, "族群": "MIH平台概念股", "大戶差 (億)": 303.6}]
     backup_sell = [{"排名": 1, "族群": "IC封測", "大戶差 (億)": -83.55}, {"排名": 2, "族群": "低軌道衛星", "大戶差 (億)": -42.85}]
     return pd.DataFrame(backup_buy), pd.DataFrame(backup_sell), "2026-06-15 (歷史基準)"
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=600)  # 縮短快取時間至10分鐘，避免盤後第一時間沒刷到最新數據
 def fetch_tw_chip_data_automated():
-    target_date = datetime.now()
-    if target_date.hour < 16: target_date = target_date - timedelta(days=1)
-    date_str = target_date.strftime("%Y-%m-%d")
-    parameter = {"dataset": "TaiwanStockInstitutionalInvestorsBuySell", "start_date": date_str, "end_date": date_str, "token": FINMIND_TOKEN}
-    try:
-        response = requests.get(API_URL, params=parameter, timeout=10)
-        data = response.json()
-        if data.get("msg") == "success" and len(data.get("data", [])) > 0:
-            df = pd.DataFrame(data["data"])
-            df['買賣超(億)'] = (df['buy'] - df['sell']) / 100000000
-            df_grouped = df.groupby('name')['買賣超(億)'].sum().reset_index()
-            df_grouped.columns = ['族群', '大戶差 (億)']
-            df_buy_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=False).head(5).copy()
-            df_sell_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=True).head(5).copy()
-            df_buy_top5['排名'] = range(1, len(df_buy_top5) + 1)
-            df_sell_top5['排名'] = range(1, len(df_sell_top5) + 1)
-            df_buy_top5['大戶差 (億)'] = df_buy_top5['大戶差 (億)'].apply(lambda x: f"+{x:.2f} 億")
-            df_sell_top5['大戶差 (億)'] = df_sell_top5['大戶差 (億)'].apply(lambda x: f"{x:.2f} 億")
-            return df_buy_top5, df_sell_top5, date_str
-        return get_backup_chips_data()
-    except: return get_backup_chips_data()
+    # 修正點：若當日未滿下午 16:00 (證交所法人籌碼上傳時間)，先看昨天的資料
+    base_date = datetime.now()
+    if base_date.hour < 16:
+        base_date = base_date - timedelta(days=1)
+        
+    # 修正點：若遇到假日前端沒資料，迴圈向前追溯最多 5 天，直到找到有籌碼數據的最近一個交易日
+    for i in range(5):
+        check_date = base_date - timedelta(days=i)
+        date_str = check_date.strftime("%Y-%m-%d")
+        
+        parameter = {
+            "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+            "start_date": date_str,
+            "end_date": date_str,
+            "token": FINMIND_TOKEN
+        }
+        try:
+            response = requests.get(API_URL, params=parameter, timeout=8)
+            data = response.json()
+            if data.get("msg") == "success" and len(data.get("data", [])) > 0:
+                df = pd.DataFrame(data["data"])
+                # 計算外資、投信、自營商總合買賣超 (單位：元 轉成 億元)
+                df['買賣超(億)'] = (df['buy'] - df['sell']) / 100000000
+                df_grouped = df.groupby('name')['買賣超(億)'].sum().reset_index()
+                df_grouped.columns = ['族群', '大戶差 (億)']
+                
+                df_buy_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=False).head(5).copy()
+                df_sell_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=True).head(5).copy()
+                
+                df_buy_top5['排名'] = range(1, len(df_buy_top5) + 1)
+                df_sell_top5['排名'] = range(1, len(df_sell_top5) + 1)
+                
+                df_buy_top5['大戶差 (億)'] = df_buy_top5['大戶差 (億)'].apply(lambda x: f"+{x:.2f} 億")
+                df_sell_top5['大戶差 (億)'] = df_sell_top5['大戶差 (億)'].apply(lambda x: f"{x:.2f} 億")
+                
+                # 重新調整輸出欄位順序以符合原 UI
+                cols_order = ['排名', '族群', '大戶差 (億)']
+                return df_buy_top5[cols_order], df_sell_top5[cols_order], date_str
+        except:
+            continue
+            
+    return get_backup_chips_data()
 
 df_automated_buy, df_automated_sell, chip_date_info = fetch_tw_chip_data_automated()
 
@@ -105,7 +126,7 @@ with col_sell:
 st.markdown("---")
 
 # ==============================================================================
-# 五、全球主要大盤即時監控 (強固型防錯錯位版)
+# 五、全球主要大盤即時監控 (功能修正：解決台灣夜盤代號斷線、NULL 錯位問題)
 # ==============================================================================
 INDEX_CONFIG = {
     '^GSPC': {'name': '美股 S&P 500', 'type': '大盤'}, 
@@ -118,24 +139,41 @@ INDEX_CONFIG = {
 st.markdown("### 📊 全球主要大盤 & 台指夜盤即時監控")
 index_tickers = list(INDEX_CONFIG.keys())
 
-# 核心防錯點一：使用 group_by='ticker' 隔離各國市場結構，避免交錯 NULL 造成 Index 錯位
+# 使用 group_by='ticker'，讓返回的 dataframe 結構在最上層是商品代號，完全封鎖 Null 值引起的錯位
 idx_market_data = yf.download(index_tickers, period='5d', interval='1m', progress=False, group_by='ticker')
+
+# 初始化備用價格，防範 API 完全拿不到數據時畫面出現異常大數字
 shared_prices = {"^GSPC": 44169.0, "^IXIC": 19000.0, "^TWII": 44169.0, "WTW=F": 44022.0, "^N225": 39000.0, "^KS11": 2700.0}
 
 if not idx_market_data.empty:
     cols = st.columns(len(index_tickers))
     for idx, t in enumerate(index_tickers):
         try:
-            # 核心防錯點二：確認 MultiIndex 第一層是否存在該 Ticker，並嚴格清洗空值橫列
             if t in idx_market_data.columns.levels[0]:
-                ticker_df = idx_market_data[t].dropna(subset=['Close'])
-                if not ticker_df.empty:
-                    curr_val = float(ticker_df['Close'].iloc[-1])
-                    if len(ticker_df) > 1:
-                        prev_val = float(ticker_df['Close'].iloc[0])
-                        chg_pct = ((curr_val - prev_val) / prev_val) * 100
-                    else:
-                        chg_pct = 0.0
+                # 修正點：不可直接 dropna 導致整個 dataframe 長度為 0 崩潰，改為個別欄位安全檢查
+                ticker_df = idx_market_data[t]
+                valid_close = ticker_df['Close'].dropna()
+                
+                # 特殊處理台指夜盤 (WTW=F)：若 yfinance 沒抓到，改抓台股大盤指數或日盤期貨進行合理對齊
+                if t == 'WTW=F' and (valid_close.empty or len(valid_close) < 1):
+                    if '^TWII' in idx_market_data.columns.levels[0]:
+                        tw_close = idx_market_data['^TWII']['Close'].dropna()
+                        if not tw_close.empty:
+                            curr_val = float(tw_close.iloc[-1])
+                            prev_val = float(tw_close.iloc[0]) if len(tw_close) > 1 else curr_val
+                            chg_pct = ((curr_val - prev_val) / prev_val) * 100
+                            # 標記當前為同步日盤參考價
+                            with cols[idx]:
+                                st.metric(label=f"日盤同步 | {INDEX_CONFIG[t]['name']}", value=f"{curr_val:,.2f}", delta=f"{chg_pct:+.2f}%")
+                            shared_prices[t] = curr_val
+                            continue
+
+                if not valid_close.empty:
+                    curr_val = float(valid_close.iloc[-1])
+                    # 計算當日漲跌幅 (取當前最新價與前一日收盤或當日開盤基期對照)
+                    valid_open = ticker_df['Open'].dropna()
+                    base_open = float(valid_open.iloc[0]) if not valid_open.empty else curr_val
+                    chg_pct = ((curr_val - base_open) / base_open) * 100 if base_open != 0 else 0.0
                     
                     shared_prices[t] = curr_val
                     with cols[idx]:
@@ -144,13 +182,14 @@ if not idx_market_data.empty:
                 else:
                     with cols[idx]: st.metric(label=f"{INDEX_CONFIG[t]['type']} | {INDEX_CONFIG[t]['name']}", value="休市中/無報價", delta=None)
             else:
-                with cols[idx]: st.metric(label=f"{INDEX_CONFIG[t]['type']} | {INDEX_CONFIG[t]['name']}", value="欄位對位中", delta=None)
-        except:
+                with cols[idx]: st.metric(label=f"{INDEX_CONFIG[t]['type']} | {INDEX_CONFIG[t]['name']}", value="連線對位中", delta=None)
+        except Exception as e:
+            # 修正點：絕不在前端輸出錯誤 Log 陣列，捕捉異常並顯示重試，確保 UI 維持整潔高質感
             with cols[idx]: st.metric(label=f"連線延遲 | {INDEX_CONFIG[t]['name']}", value="自動重試中", delta=None)
 st.markdown("---")
 
 # ==============================================================================
-# 六、基本焦點觀察池配置
+# 六.. 焦點核心觀察池配置
 # ==============================================================================
 TW_STOCK_CONFIG = {
     '1. 被動元件 (多頭總司令)': {'2492.TW': '華新科', '2327.TW': '國巨', '2375.TW': '凱美', '3026.TW': '禾伸堂', '3090.TW': '日電貿', '2478.TW': '大毅', '6173.TW': '信昌電', '6449.TW': '鈺邦', '3236.TW': '千如', '2484.TW': '希華'},
@@ -207,7 +246,7 @@ df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 # ==============================================================================
 # 七、深度選股引擎核心模組 (大戶+研發+合約負債+月營收)
 # ==============================================================================
-@st.cache_data(ttl=86400) # 全市場股票清單每日僅抓取一次
+@st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_ids():
     try:
         parameter = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
@@ -219,7 +258,7 @@ def fetch_all_taiwan_stock_ids():
     except: pass
     return [("3550", "聯聯發"), ("2338", "光罩"), ("3035", "智原"), ("2492", "華新科"), ("2327", "國巨")]
 
-@st.cache_data(ttl=14400) # 四選股指標計算快取 4 小時
+@st.cache_data(ttl=14400)
 def run_heavy_fundamental_screener(stock_list_with_name):
     start_financial = (datetime.now() - timedelta(days=450)).strftime("%Y-%m-%d")
     start_chip = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
@@ -227,10 +266,8 @@ def run_heavy_fundamental_screener(stock_list_with_name):
     total_count = len(stock_list_with_name)
     
     for idx, (stock_id, stock_name) in enumerate(stock_list_with_name):
-        # 沙盒限制：全市場大量掃描時，前端示範優先過濾前45檔，防止單線程HTTP卡死
         if total_count > 50 and idx > 45: break
         try:
-            # 1. 驗證月營收 (MoM > 0 且 YoY 具備強韌度)
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=5).json()
             if not (r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 2): continue
@@ -238,7 +275,6 @@ def run_heavy_fundamental_screener(stock_list_with_name):
             latest_rev = df_rev.iloc[-1]
             if not (latest_rev['revenue_month_growth_rate'] > 0 and latest_rev['revenue_year_growth_rate'] > -5): continue
             
-            # 2. 驗證研發費用與合約負債
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_fs = requests.get(API_URL, params=p_fs, timeout=5).json()
             if not (r_fs.get("msg") == "success" and len(r_fs.get("data", [])) > 0): continue
@@ -249,7 +285,6 @@ def run_heavy_fundamental_screener(stock_list_with_name):
             if df_rd.empty or df_cl.empty or len(df_rd) < 2 or len(df_cl) < 2: continue
             if not (df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.95 and df_cl.iloc[-1]['value'] > df_cl.iloc[-2]['value']): continue
             
-            # 3. 驗證千張大戶持股連續吸籌
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
             r_cp = requests.get(API_URL, params=p_cp, timeout=5).json()
             if not (r_cp.get("msg") == "success" and len(r_cp.get("data", [])) > 0): continue
@@ -311,7 +346,6 @@ with view_tab2:
 # ---- Tab 3: 全新重磅深度量化選股引擎 ----
 with view_tab3:
     st.markdown("### 🎯 跨指標交叉過濾：黃金基本面轉折黑馬股")
-    st.markdown("本頁面串接 `TaiwanStockInfo` 全市場代號，嚴格清洗「大戶減持」、「無研發投入」或「無在手大單（合約負債）」的雜訊個股。")
     
     col_btn1, col_btn2 = st.columns([3, 4])
     with col_btn1: trigger_scan = st.button("🔄 立即清除快取，執行全市場深層重新掃描", type="primary")
@@ -320,7 +354,7 @@ with view_tab3:
         st.cache_data.clear()
         st.warning("⚡ 快取已強制清空！正在向交易所重新調閱最新一期籌碼與財報細項...")
 
-    with st.spinner("⏳ 正在執行全市場個股數據交叉比對中（已啟動大數據優化快取機制）..."):
+    with st.spinner("⏳ 正在執行全市場個股數據交叉比對中..."):
         full_market_pool = fetch_all_taiwan_stock_ids()
         df_screen_result = run_heavy_fundamental_screener(full_market_pool)
     
@@ -328,13 +362,12 @@ with view_tab3:
         st.success(f"🎯 自動過濾完成。目前共有 **{len(df_screen_result)}** 檔個股完美符合四大黃金指標：")
         st.dataframe(df_screen_result, use_container_width=True, hide_index=True)
         
-        # 加密可視化：獲選個股的在手合約負債規模對比
         df_screen_result['純數字合約負債'] = df_screen_result['最新合約負債(億)'].str.replace(' 億', '').astype(float)
         fig_cl_scan = go.Figure(go.Bar(x=df_screen_result['公司名稱'], y=df_screen_result['純數字合約負債'], marker_color='#ff4b4b', text=df_screen_result['最新合約負債(億)'], textposition='auto'))
         fig_cl_scan.update_layout(title="獲選個股：在手訂單能見度（流動合約負債規模對比：億元）", height=280, margin=dict(l=10, r=10, t=40, b=10))
         st.plotly_chart(fig_cl_scan, use_container_width=True)
     else:
-        st.info("ℹ️ 當前市場暫無個股完美交集【大戶加碼 + 研發費用暴增 + 合約負債提高 + 月營收雙增】。這通常代表主力資金現階段正處於洗盤或財報空窗期。")
+        st.info("ℹ️ 當前市場暫無個股完美交集【大戶加碼 + 研發費用暴增 + 合約負債提高 + 月營收雙增】。")
 
 # ==============================================================================
 # 九、網頁定時自動循環刷新機制
