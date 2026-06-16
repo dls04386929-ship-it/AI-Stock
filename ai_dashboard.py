@@ -607,8 +607,38 @@ st.sidebar.markdown("---")
 # 十一、新增：量化選股與真實數據擷取引擎
 # ==============================================================================
 # ==============================================================================
-# 十二、2330.TW 深度基本面與籌碼監測引擎 (優化版)
+# 核心資料擷取函式 (必須放入您的程式碼中)
 # ==============================================================================
+
+@st.cache_data(ttl=3600)
+def get_finmind_data(dataset, stock_id, start_date=None):
+    """
+    這是與 FinMind API 溝通的唯一途徑
+    dataset: 要查詢的資料集名稱
+    stock_id: 股票代號
+    """
+    url = "https://api.finmindtrade.com/api/v4/data"
+    params = {
+        "dataset": dataset,
+        "data_id": stock_id,
+        "token": FINMIND_TOKEN,
+    }
+    if start_date:
+        params["start_date"] = start_date
+        
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        result = response.json()
+        
+        # 檢查 API 是否回傳成功
+        if result.get("status") == 200 and result.get("data"):
+            return pd.DataFrame(result["data"])
+        else:
+            # 若無數據，回傳空的 DataFrame
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"連線失敗: {e}")
+        return pd.DataFrame()
 st.markdown("### 💎 2330 台積電深度基本面與籌碼監測 (除錯優化版)")
 
 @st.cache_data(ttl=3600)
