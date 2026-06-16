@@ -671,6 +671,33 @@ all_stocks = get_electronics_pool()
 batch_stocks = all_stocks[st.session_state.batch_index : st.session_state.batch_index + 50]
 
 data_list = []
+
+# 1. 確保 data_list 有內容
+if data_list:
+    df_quant = pd.DataFrame(data_list)
+    
+    # 2. 【除錯與修正】確保欄位名稱正確
+    # 如果執行到這裡出現 KeyError，代表 df_quant 的欄位不叫這些名字
+    # 我們在這裡印出真正的欄位名稱來確認
+    st.write("目前 DataFrame 的欄位:", df_quant.columns.tolist())
+    
+    # 3. 確保 subset 裡面的欄位確實存在於 df_quant 中
+    # 我們過濾掉不存在的欄位，防止錯誤發生
+    required_cols = ['大戶增', '研發增', '合約負債增', '月營收雙增']
+    existing_cols = [col for col in required_cols if col in df_quant.columns]
+    
+    if existing_cols:
+        st.dataframe(
+            df_quant.style.map(color_val, subset=existing_cols),
+            use_container_width=True
+        )
+    else:
+        st.warning("找不到對應的指標欄位，請檢查資料來源格式。")
+else:
+    st.info("目前沒有符合條件的電子股數據。")
+
+
+
 for sid in batch_stocks:
     metrics = fetch_real_data(sid)
     data_list.append({"股票代號": sid, **metrics})
