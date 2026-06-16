@@ -167,11 +167,11 @@ if not idx_market_data.empty:
 st.markdown("---")
 
 # ==============================================================================
-# 六、焦點核心池板塊配置庫 (共 27 檔)
+# 六、焦點核心觀察池配置 (原始 5 大完整族群 + 國際美日韓巨頭共 27 檔商品代號)
 # ==============================================================================
 TW_STOCK_CONFIG = {
     '1. 被動元件 (多頭總司令)': {'2492.TW': '華新科', '2327.TW': '國巨', '2375.TW': '凱美', '3026.TW': '禾伸堂', '3090.TW': '日電貿', '2478.TW': '大毅', '6173.TW': '信昌電', '6449.TW': '鈺邦', '8042.TW': '金山電', '8043.TW': '蜜望實', '6175.TW': '立敦', '3624.TW': '光頡', '3236.TW': '千如', '5328.TW': '華容', '6155.TW': '鈞寶', '8121.TW': '越峰'},
-    '2. 半導體矽晶圓 (產業築底完成)': {'5483.TW': '中美晶', '6488.TW': '環球晶', '6182.TW': '合晶', '3532.TW': '台勝科', '3016.TW': '嘉晶', '2338.TW': '光罩', '6139.TW': '亞翔'},
+    '2. 半導體矽晶圓 (產業築底完成)': {'5483.TW': '中美晶', '6488.tw': '環球晶', '6182.TW': '合晶', '3532.TW': '台勝科', '3016.TW': '嘉晶', '2338.TW': '光罩', '6139.TW': '亞翔'},
     '3. 記憶體與 IC 設計 (消費電子回暖)': {'2344.TW': '華邦電', '4973.TW': '廣穎', '3035.TW': '智原', '4919.TW': '新唐', '2401.TW': '凌陽', '8096.TW': '擎亞', '2489.TW': '瑞軒'},
     '4. 光學鏡頭與光通訊 (地緣政治緩解)': {'3008.TW': '大立光', '3406.TW': '玉晶光', '3362.TW': '先進光', '4979.TW': '華星光'},
     '5. PCB、電子材料與能源化工': {'1303.TW': '南亞', '1714.TW': '和桐', '6274.TW': '台耀', '6153.TW': '嘉聯益', '6191.TW': '精成科', '2484.TW': '希華'}
@@ -182,13 +182,10 @@ GLOBAL_STOCK_CONFIG = {
     '全球記憶體巨頭 (美韓對比)': {'MU': {'name': '美光科技 (儲存記憶體)', 'nation': '美'}, '000060.KS': {'name': 'SK 海力士 (HBM 核心供應商)', 'nation': '韓'}},
     '半導體設備與先進材料 (日美)': {'8035.T': {'name': '東京威力科創 (Tokyo Electron)', 'nation': '日'}, '6857.T': {'name': 'Advantest (愛德萬測試)', 'nation': '日'}, 'AMAT': {'name': '應用材料 (Applied Materials)', 'nation': '美'}, 'ASML': {'name': 'ASML (荷蘭商/美股掛牌艾司摩爾)', 'nation': '美'}},
     '全球通訊與基礎建設 (美)': {'MRVL': {'name': 'Marvell (高階光晶片/網路)', 'nation': '美'}, 'LHX': {'name': 'L3Harris (國防低軌衛星關鍵)', 'nation': '美'}},
-    '全球被動元件與精密光學 (日)': {'6981.T': {'name': '村田製作所 (全球MLCC龍頭)', 'nation': '日'}, '6976.T': {'name': '太陽誘電 (高階被動元件)', 'nation': '日'}, '7731.T': {'name': 'Nikon (精密光學與半導體鏡頭)', 'nation': '日'}}
+    '全球被動元件與精密光學 (日)': {'6981.T': {'name': '村田製作所 (開局MLCC)', 'nation': '日'}, '6976.T': {'name': '太陽誘電 (高階被動元件)', 'nation': '日'}, '7731.T': {'name': 'Nikon (精密鏡頭)', 'nation': '日'}}
 }
 
-# ==============================================================================
-# 六、大數據動態運算引擎 (已同步修正多重索引取值方式)
-# ==============================================================================
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=30)
 def process_all_market_intelligence():
     tw_tickers = []; [tw_tickers.extend(s.keys()) for s in TW_STOCK_CONFIG.values()]
     global_tickers = []; [global_tickers.extend(s.keys()) for s in GLOBAL_STOCK_CONFIG.values()]
@@ -209,7 +206,7 @@ def process_all_market_intelligence():
                         s_df = tw_data[t].dropna(subset=['Close'])
                         if not s_df.empty:
                             curr = float(s_df['Close'].iloc[-1])
-                            op = float(s_df['Close'].iloc[0]) if len(s_df) > 1 else curr
+                            op = float(s_df['Close'].iloc[0]) if len(s_df)>1 else curr
                             pct = ((curr - op) / op) * 100 if op != 0 else 0.0
                             group_pcts.append(pct)
                             if pct > 0: up_c += 1
@@ -227,12 +224,13 @@ def process_all_market_intelligence():
                         if not g_df.empty:
                             global_results.append({'國際群組': group, '國家': info['nation'], '代號': t, '公司': info['name'], '最新價': float(g_df['Close'].iloc[-1]), '今日漲跌幅': 0.0})
                 except: pass
+                
     return pd.DataFrame(tw_results), pd.DataFrame(tw_rotation), pd.DataFrame(global_results)
 
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度選股引擎核心數據解析函數 (放寬型：完美放寬為任意 3 指標符合)
+# 七、深度全市場選股引擎 (重要修正：完美放寬為『符合任意 3 項或以上指標』即可入榜)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
@@ -246,20 +244,22 @@ def fetch_all_taiwan_stock_pool():
     except: pass
     return [("2492", "華新科"), ("2327", "國巨"), ("5483", "中美晶"), ("6488", "環球晶"), ("3035", "智原"), ("4919", "新唐")]
 
-@st.cache_data(ttl=28800)
+@st.cache_data(ttl=28800) # 快取防護 8 小時
 def run_relaxed_fundamental_screener(stock_list_pool):
     start_financial = (datetime.now() - timedelta(days=450)).strftime("%Y-%m-%d")
     start_chip = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
     qualified_output = []
+    
+    # 全市場動態掃描深度最大值限制，防止 Streamlit 前端長跑卡死
     max_scan_depth = min(len(stock_list_pool), 85) 
     
     for idx in range(max_scan_depth):
         stock_id, stock_name = stock_list_pool[idx]
         try:
             score = 0
-            metric_details = {"大戶變動": "❌ 未達標", "研發變動": "❌ 未達標", "合約負債": "❌ 未達標", "營收狀態": "❌ 未達標", "val_cl": 0.0}
+            metric_details = {"大戶籌碼": "❌ 未達標", "研發投入": "❌ 未達標", "合約負債": "❌ 未達標", "月營收表現": "❌ 未達標", "val_cl": 0.0}
             
-            # [指標 4 驗證：月營收雙增]
+            # 1. 驗證月營收雙增
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=3).json()
             if r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 1:
@@ -267,9 +267,9 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 l_rev = df_rev.iloc[-1]
                 if l_rev['revenue_month_growth_rate'] > 0 and l_rev['revenue_year_growth_rate'] > -5:
                     score += 1
-                    metric_details["營收狀態"] = f"🟢 雙增 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
+                    metric_details["月營收表現"] = f"🟢 雙增 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
                     
-            # [指標 2 & 3 驗證：財報細項]
+            # 2 & 3. 驗證研發費用與合約負債
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_fs = requests.get(API_URL, params=p_fs, timeout=3).json()
             if r_fs.get("msg") == "success" and len(r_fs.get("data", [])) > 0:
@@ -280,7 +280,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 if not df_rd.empty and len(df_rd) >= 2:
                     if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.95:
                         score += 1
-                        metric_details["研發變動"] = "🟢 持續投入"
+                        metric_details["研發投入"] = "🟢 持續擴大"
                 if not df_cl.empty and len(df_cl) >= 2:
                     val_now = df_cl.iloc[-1]['value']
                     val_prev = df_cl.iloc[-2]['value']
@@ -289,7 +289,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                         score += 1
                         metric_details["合約負債"] = f"🟢 增加 ({val_now/100000000:.2f}億)"
                         
-            # [指標 1 驗證：千張大戶]
+            # 4. 驗證千張大戶持股
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
             r_cp = requests.get(API_URL, params=p_cp, timeout=3).json()
             if r_cp.get("msg") == "success" and len(r_cp.get("data", [])) > 0:
@@ -300,14 +300,14 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                     p_pct = df_1000.iloc[-2]['percent']
                     if c_pct > p_pct:
                         score += 1
-                        metric_details["大戶變動"] = f"🟢 加碼 ({c_pct:.1f}%)"
+                        metric_details["大戶籌碼"] = f"🟢 加碼 ({c_pct:.1f}%)"
                         
-            # 滿足「任意 3 個或以上指標」即選入
+            # 關鍵修改點：只要符合 3 個指標或以上即判定過關
             if score >= 3:
                 qualified_output.append({
                     "股票代碼": stock_id, "公司名稱": stock_name, "符合指標數": f"🔥 {score}/4 獲選",
-                    "大戶籌碼變動": metric_details["大戶變動"], "研發開支狀態": metric_details["研發變動"],
-                    "最新合約負債": f"{metric_details['val_cl']:.2f} 億", "月營收表現": metric_details["營收狀態"],
+                    "大戶籌碼變動": metric_details["大戶籌碼"], "研發開支狀態": metric_details["研發投入"],
+                    "最新合約負債": f"{metric_details['val_cl']:.2f} 億", "月營收表現": metric_details["月營收表現"],
                     "純數字合約負債": metric_details["val_cl"]
                 })
         except: pass
