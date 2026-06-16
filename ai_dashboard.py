@@ -232,7 +232,7 @@ def process_all_market_intelligence():
 df_tw, df_tw_rot, df_global = process_all_market_intelligence()
 
 # ==============================================================================
-# 七、深度全市場選股引擎 (精準瞄準電子股 + 50檔動態分組輪巡 + 60秒冷卻機制)
+# 七、深度全市場選股引擎 (透明數值版：每波 50 檔完整動態列出 4 指標真實數據，2指標過關)
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def fetch_all_taiwan_stock_pool():
@@ -253,8 +253,8 @@ def fetch_all_taiwan_stock_pool():
 # 初始化 Streamlit 輪巡狀態機
 if 'scan_pointer' not in st.session_state:
     st.session_state.scan_pointer = 0
-if 'accumulated_black_horses' not in st.session_state:
-    st.session_state.accumulated_black_horses = []
+if 'current_batch_raw_data' not in st.session_state:
+    st.session_state.current_batch_raw_data = []
 
 def run_relaxed_fundamental_screener(stock_list_pool):
     start_financial = (datetime.now() - timedelta(days=550)).strftime("%Y-%m-%d")
@@ -268,37 +268,47 @@ def run_relaxed_fundamental_screener(stock_list_pool):
     if not target_batch:
         st.success("🎉 全市場電子股已全部掃描完畢！已重置進度。")
         st.session_state.scan_pointer = 0
-        st.session_state.accumulated_black_horses = []
+        st.session_state.current_batch_raw_data = []
         return pd.DataFrame()
 
-    st.info(f"⚡ 正在動態掃描電子股第 {current_idx + 1} 至 {min(current_idx + batch_size, len(stock_list_pool))} 檔 (總計: {len(stock_list_pool)} 檔)...")
+    st.info(f"⚡ 正在動態調閱電子股第 {current_idx + 1} 至 {min(current_idx + batch_size, len(stock_list_pool))} 檔真實數據 (總計: {len(stock_list_pool)} 檔)...")
     
-    # 用於動態顯示畫面的進度條與日誌容器
+    # 用於即時顯示畫面的進度條與日誌容器
     progress_bar = st.progress(0)
     status_log = st.empty()
     
-    new_qualified_output = []
+    # 這一組 50 檔的完整數據觀測池
+    batch_results = []
     
     for idx, (stock_id, stock_name) in enumerate(target_batch):
         # 更新動態進度條
         progress_bar.progress((idx + 1) / len(target_batch))
-        status_log.text(f"🔍 正在交叉分析基本面轉折: {stock_id} {stock_name}...")
+        status_log.text(f"🔍 正在向交易所/FinMind索取真實數值: {stock_id} {stock_name}...")
         
         try:
             score = 0
-            metric_details = {"大戶籌碼": "❌ 未達標", "研發投入": "❌ 未達標", "合約負債": "❌ 未達標", "月營收表現": "❌ 未達標", "val_cl": 0.0}
+            # 預設透明數據顯示文字
+            rev_txt = "⚠️ 無營收數據"
+            rd_txt = "⚠️ 無財報數據"
+            cl_txt = "⚠️ 無合約負債"
+            chip_txt = "⚠️ 無籌碼數據"
             
-            # 1. 驗證月營收
+            # 1. 索取並驗證月營收真實數值
             p_rev = {"dataset": "TaiwanStockMonthRevenue", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_rev = requests.get(API_URL, params=p_rev, timeout=3).json()
             if r_rev.get("msg") == "success" and len(r_rev.get("data", [])) > 1:
                 df_rev = pd.DataFrame(r_rev["data"]).sort_values(by='date')
                 l_rev = df_rev.iloc[-1]
-                if l_rev['revenue_month_growth_rate'] > 0 or l_rev['revenue_year_growth_rate'] > -5:
+                y_growth = l_rev['revenue_year_growth_rate']
+                m_growth = l_rev['revenue_month_growth_rate']
+                
+                if m_growth > 0 or y_growth > -5:
                     score += 1
-                    metric_details["月營收表現"] = f"🟢 績優 (年增 {l_rev['revenue_year_growth_rate']:.1f}%)"
+                    rev_txt = f"🟢 績優 (年增 {y_growth:.1f}% / 月增 {m_growth:.1f}%)"
+                else:
+                    rev_txt = f"❌ 未達標 (年增 {y_growth:.1f}% / 月增 {m_growth:.1f}%)"
                     
-            # 2 & 3. 驗證研發與合約負債
+            # 2 & 3. 索取並驗證研發與合約負債真實數值（財報三表）
             p_fs = {"dataset": "TaiwanStockFinancialStatements", "data_id": stock_id, "start_date": start_financial, "token": FINMIND_TOKEN}
             r_fs = requests.get(API_URL, params=p_fs, timeout=3).json()
             if r_fs.get("msg") == "success" and len(r_fs.get("data", [])) > 0:
@@ -306,19 +316,27 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                 df_rd = df_fs[df_fs['type'].str.contains('Research and development|研發', case=False, na=False)].sort_values(by='date')
                 df_cl = df_fs[df_fs['type'].str.contains('Contract liabilities|合約負債', case=False, na=False)].sort_values(by='date')
                 
+                # 研發費用真實比對
                 if not df_rd.empty and len(df_rd) >= 2:
+                    val_rd_now = df_rd.iloc[-1]['value'] / 100000000
+                    val_rd_prev = df_rd.iloc[-2]['value'] / 100000000
                     if df_rd.iloc[-1]['value'] >= df_rd.iloc[-2]['value'] * 0.90: 
                         score += 1
-                        metric_details["研發投入"] = "🟢 持續擴大"
+                        rd_txt = f"🟢 持續 (現: {val_rd_now:.2f}億 / 前: {val_rd_prev:.2f}億)"
+                    else:
+                        rd_txt = f"❌ 縮水 (現: {val_rd_now:.2f}億 / 前: {val_rd_prev:.2f}億)"
+                
+                # 合約負債真實比對
                 if not df_cl.empty and len(df_cl) >= 2:
-                    val_now = df_cl.iloc[-1]['value']
-                    val_prev = df_cl.iloc[-2]['value']
-                    metric_details["val_cl"] = val_now / 100000000
-                    if val_now >= val_prev * 0.95:
+                    val_cl_now = df_cl.iloc[-1]['value'] / 100000000
+                    val_cl_prev = df_cl.iloc[-2]['value'] / 100000000
+                    if df_cl.iloc[-1]['value'] >= df_cl.iloc[-2]['value'] * 0.95:
                         score += 1
-                        metric_details["合約負債"] = f"🟢 高檔 ({val_now/100000000:.2f}億)"
+                        cl_txt = f"🟢 高檔 ({val_cl_now:.2f}億 / 前: {val_cl_prev:.2f}億)"
+                    else:
+                        cl_txt = f"❌ 衰退 ({val_cl_now:.2f}億 / 前: {val_cl_prev:.2f}億)"
                         
-            # 4. 驗證千張大戶籌碼
+            # 4. 索取並驗證千張大戶籌碼真實數值
             p_cp = {"dataset": "TaiwanStockShareholdingNotations", "data_id": stock_id, "start_date": start_chip, "token": FINMIND_TOKEN}
             r_cp = requests.get(API_URL, params=p_cp, timeout=3).json()
             if r_cp.get("msg") == "success" and len(r_cp.get("data", [])) > 0:
@@ -329,32 +347,37 @@ def run_relaxed_fundamental_screener(stock_list_pool):
                     p_pct = df_1000.iloc[-2]['percent']
                     if c_pct >= p_pct * 0.99: 
                         score += 1
-                        metric_details["大戶籌碼"] = f"🟢 穩固 ({c_pct:.1f}%)"
+                        chip_txt = f"🟢 穩固 ({c_pct:.1f}% <- 上週 {p_pct:.1f}%)"
+                    else:
+                        chip_txt = f"❌ 渙散 ({c_pct:.1f}% <- 上週 {p_pct:.1f}%)"
                         
-            # 門檻放寬：符合任意 2 項指標或以上即可入榜
-            if score >= 2:
-                new_qualified_output.append({
-                    "股票代碼": stock_id, "公司名稱": stock_name, "符合指標數": f"🔥 {score}/4 獲選",
-                    "大戶籌碼變動": metric_details["大戶籌碼"], "研發開支狀態": metric_details["研發投入"],
-                    "最新合約負債": f"{metric_details['val_cl']:.2f} 億", "月營收表現": metric_details["月營收表現"],
-                    "純數字合約負債": metric_details["val_cl"]
-                })
-            time.sleep(0.1) # 基礎安全間隔
-        except: pass
+            # 不論是否過關，通通塞入結果清單，實踐「數值完全透明監控」
+            batch_results.append({
+                "股票代碼": stock_id, 
+                "公司名稱": stock_name, 
+                "大戶籌碼真實數據": chip_txt, 
+                "研發費用真實變動": rd_txt,
+                "合約負債真實增減": cl_txt, 
+                "月營收真實表現": rev_txt,
+                "符合指標數": f"{score}/4",
+                "決策篩選結果": "🔥 獲選黑馬股" if score >= 2 else "⏳ 觀望中"
+            })
+            time.sleep(0.1) # 基本流控防止鎖 IP
+        except: 
+            pass
         
     status_log.empty()
     
-    # 整合並更新狀態機資料
-    st.session_state.accumulated_black_horses.extend(new_qualified_output)
+    # 儲存當前這組 50 檔的數據到狀態機中
+    st.session_state.current_batch_raw_data = batch_results
     st.session_state.scan_pointer += batch_size
     
-    # 建立冷卻與下一波提醒介面
-    st.success(f"等候機制觸發：本組 50 檔已動態掃描完畢，目前累計篩選出 {len(st.session_state.accumulated_black_horses)} 隻黑馬股。")
+    st.success(f"💡 本組 50 檔電子股已動態解鎖，以下為 API 撈取到的真實數值明細表：")
     
-    # 用計時器實作 60 秒冷卻倒數動態顯示，不鎖死網頁
+    # 實作 60 秒冷卻倒數動態顯示，不鎖死網頁
     countdown_placeholder = st.empty()
     for remaining in range(60, 0, -1):
-        countdown_placeholder.warning(f"⏳ 遵照伺服器防禦紀律：冷卻保護中... 將於 {remaining} 秒後解鎖下一組 50 檔電子股掃描。")
+        countdown_placeholder.warning(f"⏳ 遵守伺服器防護紀律，冷卻保護中... 將於 {remaining} 秒後自動解鎖下一組 50 檔。")
         time.sleep(1)
     countdown_placeholder.success("✅ 冷卻完畢！下一組 50 檔雷達已就緒，請點擊下方按鈕繼續掃描。")
     
@@ -362,7 +385,7 @@ def run_relaxed_fundamental_screener(stock_list_pool):
     if st.button("🚀 立即啟動下一組 50 檔電子股深層掃描", key="next_batch_trigger"):
         st.rerun()
         
-    return pd.DataFrame(st.session_state.accumulated_black_horses)
+    return pd.DataFrame(st.session_state.current_batch_raw_data)
 
 # ==============================================================================
 # 八、今日台股主流板塊輪動強弱榜
