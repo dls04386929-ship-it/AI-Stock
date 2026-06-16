@@ -627,8 +627,11 @@ def get_real_metrics(stock_id):
     }
     
     try:
-        response = requests.get(url, params=params, timeout=5).json()
-        data = response.get("data", [])
+# 修改後的除錯偵測範例
+response = requests.get(url, params=params, timeout=5).json()
+if response.get("data"):
+    df = pd.DataFrame(response["data"])
+    st.write(f"股票 {stock_id} 的實際欄位清單:", df.columns.tolist()) # 【關鍵除錯】
         
         if len(data) >= 2:
             df = pd.DataFrame(data)
