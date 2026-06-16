@@ -299,16 +299,26 @@ with view_tab2:
 
 # ---- Tab 3: 全新升級：放寬型四大指標(任意 3 個符合)量化全市場選股終端 ----
 with view_tab3:
-    st.markdown("### 🎯 電子股指標即時觀測 (每 50 檔為一頁)")
+    st.markdown("### 🎯 全市場電子股指標黑馬終端 (分頁輪巡)")
     
-    # 取得電子股清單
-    all_stocks = fetch_all_taiwan_stock_pool()
-    
+    # 確保 session_state 初始化
+    if 'scan_pointer' not in st.session_state:
+        st.session_state.scan_pointer = 0
+
+    # 點擊按鈕觸發邏輯
     if st.button("🚀 讀取下一頁 50 檔電子股數據"):
-        df_display = run_paged_electronic_screener(all_stocks)
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        all_stocks = fetch_all_taiwan_stock_pool()
+        # 顯示讀取中的狀態
+        with st.spinner("正在向交易所調閱數據..."):
+            df_display = run_paged_electronic_screener(all_stocks)
+            
+            # 強效檢查：如果 df 為空，說明 API 請求失敗或進度到頂
+            if df_display is not None and not df_display.empty:
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ 目前未獲取到有效數據，可能 API 請求超時或已掃描完畢，請重新整理頁面。")
     else:
-        st.info(f"當前輪巡位置：第 {st.session_state.scan_pointer + 1} 檔至 {st.session_state.scan_pointer + 50} 檔。請點擊上方按鈕開始查看。")
+        st.info(f"💡 目前輪巡進度：已掃描至第 {st.session_state.scan_pointer} 檔。點擊上方按鈕查看下一批數據。")
 
 st.markdown("---")
 
