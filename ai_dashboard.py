@@ -641,56 +641,67 @@ def get_finmind_data(dataset, stock_id, start_date=None):
         return pd.DataFrame()
 st.markdown("### 💎 2330 台積電深度基本面與籌碼監測 (除錯優化版)")
 
+# ==============================================================================
+# 十二、2330.TW 深度基本面與籌碼監測引擎 (精準對應修正版)
+# ==============================================================================
+st.markdown("### 💎 2330 台積電深度基本面與籌碼監測")
+
 @st.cache_data(ttl=3600)
-def fetch_2330_debug_data():
+def fetch_2330_financials():
     url = "https://api.finmindtrade.com/api/v4/data"
     params = {"stock_id": "2330", "token": FINMIND_TOKEN}
     
-    # 抓取財報
-    res_fin = requests.get(url, params={**params, "dataset": "TaiwanStockFinancialStatements"}).json()
-    df_fin = pd.DataFrame(res_fin.get("data", []))
-    
-    # 抓取月營收
+    # 1. 抓取月營收
     res_rev = requests.get(url, params={**params, "dataset": "TaiwanStockMonthlyRevenue"}).json()
     df_rev = pd.DataFrame(res_rev.get("data", []))
     
-    # 抓取集保股權 (大戶)
+    # 2. 抓取完整損益表 (FinancialStatements: 綜合損益表)
+    res_pl = requests.get(url, params={**params, "dataset": "TaiwanStockFinancialStatements"}).json()
+    df_pl = pd.DataFrame(res_pl.get("data", []))
+    
+    # 3. 抓取集保股權 (大戶)
     res_chip = requests.get(url, params={**params, "dataset": "TaiwanStockHoldingSharesPer"}).json()
     df_chip = pd.DataFrame(res_chip.get("data", []))
     
-    return df_rev, df_fin, df_chip
+    return df_rev, df_pl, df_chip
 
-df_rev, df_fin, df_chip = fetch_2330_debug_data()
+df_rev, df_pl, df_chip = fetch_2330_financials()
 
-# 顯示除錯用資訊，確認資料是否存在
-if df_fin.empty:
-    st.error("財報資料為空，請檢查 API 回傳狀態。")
-else:
-    # 這裡顯示所有可能的帳目名稱，幫您找出正確的對應字串
-    st.write("系統偵測到的財報帳目項目：", df_fin['type'].unique().tolist())
-    
-    # 針對您需求的項目進行提取 (若名稱不同，請根據上方印出的清單修正以下字串)
-    # 常見名稱為：研究發展費用、合約負債-流動 等
-    target_research = df_fin[df_fin['type'].str.contains('研究發展費用', na=False)].tail(1)
-    target_contract = df_fin[df_fin['type'].str.contains('合約負債', na=False)].tail(1)
-    
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-        st.subheader("研發費用")
-        st.write(target_research[['date', 'type', 'value']] if not target_research.empty else "未找到項目")
-    with col_d2:
-        st.subheader("合約負債")
-        st.write(target_contract[['date', 'type', 'value']] if not target_contract.empty else "未找到項目")
+# 數據提取邏輯
+col_a, col_b = st.columns(2)
 
-if not df_rev.empty:
-    st.subheader("近期月營收數據")
-    st.dataframe(df_rev.tail(5), use_container_width=True)
+# --- 營收分析 ---
+with col_a:
+    st.subheader("📊 營收動能")
+    if not df_rev.empty:
+        latest = df_rev.iloc[-1]
+        st.metric("最新月營收", f"{latest['value']/1e8:.1f} 億", delta=f"{latest.get('revenue_month_year_growth_rate', 0)}%")
+    else:
+        st.write("營收資料同步中...")
 
+# --- 財報項目 (研發與負債) ---
+with col_b:
+    st.subheader("📑 關鍵財務指標")
+    if not df_pl.empty:
+        # 篩選最新季度數據
+        latest_date = df_pl['date'].max()
+        df_latest = df_pl[df_pl['date'] == latest_date]
+        
+        # 嘗試提取項目
+        research = df_latest[df_latest['type'].str.contains('研究發展費用', na=False)]
+        contract = df_latest[df_latest['type'].str.contains('合約負債', na=False)]
+        
+        st.write(f"數據截止: {latest_date}")
+        st.write(f"研發費用: {research['value'].values[0]/1e8:.2f} 億" if not research.empty else "研發費用: 暫無更新")
+        st.write(f"合約負債: {contract['value'].values[0]/1e8:.2f} 億" if not contract.empty else "合約負債: 暫無更新")
+    else:
+        st.write("財報數據尚在載入或維護中。")
+
+# --- 大戶籌碼 ---
+st.subheader("🛡️ 1000張以上大戶持股趨勢")
 if not df_chip.empty:
-    st.subheader("大戶持股比例 (1000張以上)")
-    # 篩選 1000 張以上級距
-    df_big = df_chip[df_chip['holding_shares_level'] == '1000以上']
-    st.line_chart(df_big.tail(20).set_index('date')['percent'])
+    df_big = df_chip[df_chip['holding_shares_level'] == '1000以上'].tail(15)
+    st.line_chart(df_big.set_index('date')['percent'])
 # ==============================================================================
 # 十二、網頁定時自動循環刷新機制
 # ==============================================================================
