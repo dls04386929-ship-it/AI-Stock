@@ -609,6 +609,41 @@ st.sidebar.warning(
 )
 
 # ==============================================================================
+# 新增功能：電子股量化篩選引擎
+# ==============================================================================
+if 'batch_index' not in st.session_state:
+    st.session_state.batch_index = 0
+
+def get_electronics_stocks():
+    # 此處需呼叫 FinMind 取得電子股清單
+    # 範例邏輯：篩選產業為『電子零組件』、『半導體』等
+    return ["2330", "2317", "2454", ...] # 簡化表示
+
+def fetch_quant_metrics(stock_id):
+    """取得四項指標的計算結果"""
+    # 這裡實作呼叫 FinMind API 獲取對應數據
+    # 指標 1: 計算 week_n['big_shareholder_ratio'] > week_n_1['big_shareholder_ratio']
+    # 指標 2: report_q['R&D_expense'] >= report_q_1['R&D_expense'] * 0.95
+    # 指標 3: liability_q['contract_liability'] > liability_q_1['contract_liability']
+    # 指標 4: revenue_m['mom'] > 0 and revenue_m['yoy'] > -0.05
+    return {"大戶增": True, "研發增": True, "合約負債增": True, "月營收雙增": True}
+
+st.markdown("### 🔍 電子股量化篩選監控 (每 60 秒刷新 50 筆)")
+all_elec_stocks = get_electronics_stocks()
+batch = all_elec_stocks[st.session_state.batch_index : st.session_state.batch_index + 50]
+
+results = []
+for sid in batch:
+    metrics = fetch_quant_metrics(sid)
+    results.append({"股票代號": sid, **metrics})
+
+st.table(pd.DataFrame(results))
+
+# 更新批次索引
+if st.button("手動刷新批次"):
+    st.session_state.batch_index = (st.session_state.batch_index + 50) % len(all_elec_stocks)
+
+# ==============================================================================
 # 十一、網頁定時自動循環刷新機制
 # ==============================================================================
 if auto_refresh:
