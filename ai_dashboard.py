@@ -108,6 +108,21 @@ def fetch_tw_chip_data_automated():
         try:
             response = requests.get(url, params=parameter, timeout=10)
             data = response.json()
+            
+            
+            # --- 偵錯區塊：加入這幾行 ---
+            with st.sidebar:
+                st.write(f"正在查詢日期: {date_str}")
+                st.write(f"API 回傳狀態: {data.get('msg')}")
+                if data.get("data"):
+                    st.write(f"抓到資料筆數: {len(data.get('data'))}")
+                else:
+                    st.write("未抓到資料或資料為空")
+            # ---------------------------
+
+            if data.get("msg") == "success" and len(data.get("data", [])) > 0:
+                # ... (後續處理邏輯保持不變)
+                            
             if data.get("msg") == "success" and len(data.get("data", [])) > 0:
                 df = pd.DataFrame(data["data"])
                 # 確保數值轉換正確
