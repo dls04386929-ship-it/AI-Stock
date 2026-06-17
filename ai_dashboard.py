@@ -1898,7 +1898,7 @@ with st.expander("⚙️ 六項指標說明", expanded=False):
 # ==============================================================================
 # 介面：每批 100 檔分頁掃描控制
 # ==============================================================================
-BATCH_SIZE = 100
+BATCH_SIZE = 300
 all_stock_items = list(ELECTRONIC_STOCK_DB.items())
 n_batches = (len(all_stock_items) + BATCH_SIZE - 1) // BATCH_SIZE
 
