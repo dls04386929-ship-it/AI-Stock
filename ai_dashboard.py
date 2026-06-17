@@ -119,10 +119,7 @@ def fetch_tw_chip_data_automated():
                 else:
                     st.write("未抓到資料或資料為空")
             # ---------------------------
-
-            if data.get("msg") == "success" and len(data.get("data", [])) > 0:
-                # ... (後續處理邏輯保持不變)
-                            
+                           
             if data.get("msg") == "success" and len(data.get("data", [])) > 0:
                 df = pd.DataFrame(data["data"])
                 # 確保數值轉換正確
