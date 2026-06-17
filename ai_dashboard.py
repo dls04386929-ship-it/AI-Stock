@@ -1903,6 +1903,7 @@ all_stock_items = list(ELECTRONIC_STOCK_DB.items())
 n_batches = (len(all_stock_items) + BATCH_SIZE - 1) // BATCH_SIZE
 
 st.markdown("#### 📦 分批掃描設定（每批 100 檔）")
+st.caption("🎯 預設篩選門檻已設為「符合 ≥4 項指標」— 下方結果區只會列出強力候選股，可在右側調整門檻。")
 batch_options = []
 for b in range(n_batches):
     start_i = b * BATCH_SIZE
@@ -1921,7 +1922,7 @@ with col_run:
 with col_clear:
     do_clear = st.button("🔄 清除本批結果", use_container_width=True)
 with col_min:
-    min_cond = st.number_input("最低符合項數", min_value=1, max_value=6, value=2, step=1)
+    min_cond = st.number_input("最低符合項數", min_value=1, max_value=6, value=4, step=1)
 
 session_key = f"screen_df_batch_{selected_batch_idx}"
 
