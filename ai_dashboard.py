@@ -1,5 +1,4 @@
 
-儀錶板已修復· PY
 import streamlit as st
 import yfinance as yf
 import pandas as pd
