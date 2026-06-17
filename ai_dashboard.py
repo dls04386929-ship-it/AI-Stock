@@ -790,50 +790,141 @@ st.sidebar.warning(
 st.markdown("---")
 
 # ==============================================================================
-# 十一、盤後量化數據監控：電子股基本面四指標篩選引擎
+# 十一、盤後量化數據監控：電子股四指標篩選引擎（含 API 偵測器）
 # ==============================================================================
-st.markdown("### 🔬 盤後量化數據監控｜電子股基本面四指標篩選站")
+st.markdown("### 🔬 盤後量化數據監控｜全台電子股基本面四指標篩選站")
 st.caption(
     "篩選邏輯：同時符合以下四項指標中 **≥ 2 項**，即列入觀察名單。"
-    "｜✅ 大戶持股增加　✅ 研發費用增加　✅ 合約負債增加　✅ 月營收連續雙增"
+    "｜🐋 大戶持股增　🔬 研發費用增　📋 合約負債增　📈 月營收連續雙增"
 )
 
-# ------------------------------------------------------------------------------
-# 電子股資料庫（可依需求擴充）
-# ------------------------------------------------------------------------------
-ELECTRONIC_STOCK_DB = {
-    # 被動元件
-    "2492": "華新科", "2327": "國巨", "2375": "凱美", "3026": "禾伸堂",
-    "2478": "大毅",   "6449": "鈺邦", "6175": "立敦", "3624": "光頡",
-    # 矽晶圓/半導體
-    "5483": "中美晶", "6488": "環球晶", "6182": "合晶", "3532": "台勝科",
-    "3016": "嘉晶",   "2338": "光罩",   "6139": "亞翔",
-    # 記憶體/IC設計
-    "2344": "華邦電", "3035": "智原",   "4919": "新唐", "2401": "凌陽",
-    # 光學/光通訊
-    "3008": "大立光", "3406": "玉晶光", "3362": "先進光", "4979": "華星光",
-    # PCB/電子材料
-    "6153": "嘉聯益", "2484": "希華",   "6191": "精成科",
-    # 半導體大廠
-    "2330": "台積電", "2303": "聯電",   "2379": "瑞昱", "2454": "聯發科",
-    "3711": "日月光投控", "2308": "台達電", "2382": "廣達", "2317": "鴻海",
-    "2357": "華碩",   "2353": "宏碁",   "3034": "聯詠", "6770": "力積電",
-    "2337": "旺宏",   "5347": "世界先進","2347": "聯強", "3533": "嘉澤",
-    "6274": "台耀",   "4938": "和碩",   "2395": "研華", "2385": "群光",
-}
-
-# ------------------------------------------------------------------------------
-# FinMind API 資料抓取工具函數
-# ------------------------------------------------------------------------------
 FINMIND_URL = "https://api.finmindtrade.com/api/v4/data"
 
-def _fm_get(dataset: str, data_id: str, start: str, end: str) -> pd.DataFrame:
-    """通用 FinMind 資料抓取，失敗回傳空 DataFrame"""
+# ==============================================================================
+# 🔍 步驟零：API 原始資料偵測器（每次啟動都會執行，讓你看到真實欄位）
+# ==============================================================================
+@st.cache_data(ttl=3600)
+def probe_api_schemas():
+    """
+    用台積電(2330)測試各 dataset 的真實欄位與範例資料，
+    回傳 dict { dataset_name: {"columns": [...], "sample": [...], "msg": ...} }
+    """
+    probe_stock = "2330"
+    end_d = datetime.now().strftime("%Y-%m-%d")
+    datasets = {
+        "月營收":     ("TaiwanStockMonthRevenue",          (datetime.now()-timedelta(days=150)).strftime("%Y-%m-%d")),
+        "持股分級":   ("TaiwanStockHoldingSharesPer",       (datetime.now()-timedelta(days=400)).strftime("%Y-%m-%d")),
+        "損益表":     ("TaiwanStockFinancialStatements",    (datetime.now()-timedelta(days=400)).strftime("%Y-%m-%d")),
+        "資產負債表": ("TaiwanStockBalanceSheet",           (datetime.now()-timedelta(days=400)).strftime("%Y-%m-%d")),
+    }
+    result = {}
+    for label, (ds, start_d) in datasets.items():
+        try:
+            r = requests.get(FINMIND_URL, params={
+                "dataset": ds, "data_id": probe_stock,
+                "start_date": start_d, "end_date": end_d,
+                "token": FINMIND_TOKEN
+            }, timeout=10)
+            d = r.json()
+            if d.get("msg") == "success" and d.get("data"):
+                df_probe = pd.DataFrame(d["data"])
+                result[label] = {
+                    "dataset": ds,
+                    "msg": "success",
+                    "rows": len(df_probe),
+                    "columns": list(df_probe.columns),
+                    "sample": df_probe.tail(3).to_dict(orient="records"),
+                    "df": df_probe
+                }
+            else:
+                result[label] = {"dataset": ds, "msg": d.get("msg","unknown"), "rows":0, "columns":[], "sample":[], "df": pd.DataFrame()}
+        except Exception as e:
+            result[label] = {"dataset": ds, "msg": str(e), "rows":0, "columns":[], "sample":[], "df": pd.DataFrame()}
+    return result
+
+with st.spinner("🔌 正在連線 FinMind API，偵測各資料集真實欄位結構..."):
+    probe_results = probe_api_schemas()
+
+with st.expander("🔍 API 原始資料偵測結果（展開查看真實欄位與範例資料）", expanded=True):
+    for label, info in probe_results.items():
+        status_icon = "✅" if info["msg"] == "success" else "❌"
+        st.markdown(f"**{status_icon} {label}** — `{info['dataset']}` | 狀態: `{info['msg']}` | 回傳筆數: {info['rows']}")
+        if info["columns"]:
+            st.code(f"欄位：{info['columns']}", language=None)
+        if info["sample"]:
+            st.dataframe(pd.DataFrame(info["sample"]), use_container_width=True, hide_index=True)
+        st.markdown("---")
+
+# 根據偵測結果決定各 dataset 是否可用
+api_ok = {label: info["msg"] == "success" for label, info in probe_results.items()}
+
+# ==============================================================================
+# 全台電子股資料庫（上市+上櫃，約 300 檔）
+# ==============================================================================
+ELECTRONIC_STOCK_DB = {
+    # ── 半導體製造/晶圓代工 ──
+    "2330":"台積電","2303":"聯電","5347":"世界先進","6770":"力積電","2337":"旺宏",
+    "3704":"合一","3529":"力旺","4967":"十銓","6550":"北極星藥業",
+    # ── IC 設計 ──
+    "2454":"聯發科","3034":"聯詠","2379":"瑞昱","3231":"緯創","2IC設計":"",
+    "4958":"臻鼎-KY","3533":"嘉澤","6415":"矽力-KY","2478":"大毅",
+    "2881":"富邦金","3037":"欣興","6669":"緯穎","3702":"大聯大",
+    "4919":"新唐","2401":"凌陽","3035":"智原","4906":"正文",
+    "6669":"緯穎","5274":"信驊","6274":"台耀","3532":"台勝科",
+    "6770":"力積電","3514":"昱晶","4919":"新唐","2454":"聯發科",
+    "2408":"南亞科","5483":"中美晶","6488":"環球晶","6182":"合晶",
+    "3016":"嘉晶","2338":"光罩","6139":"亞翔",
+    # ── 被動元件 ──
+    "2327":"國巨","2492":"華新科","2375":"凱美","3026":"禾伸堂",
+    "6449":"鈺邦","6175":"立敦","3624":"光頡","3236":"千如",
+    "5328":"華容","6155":"鈞寶","8121":"越峰","2478":"大毅",
+    "3090":"日電貿","8042":"金山電","6173":"信昌電",
+    # ── 封測 ──
+    "3711":"日月光投控","2325":"矽品","6271":"同欣電","2329":"華泰",
+    "6147":"頎邦","2369":"菱生","3014":"全漢","3017":"奇鋐",
+    # ── PCB ──
+    "2367":"燿華","3037":"欣興","8046":"南電","2354":"鴻準",
+    "6153":"嘉聯益","3044":"健鼎","2345":"智邦","2352":"佳世達",
+    "4138":"曜亞","6191":"精成科","2484":"希華",
+    # ── 光學/鏡頭 ──
+    "3008":"大立光","3406":"玉晶光","3362":"先進光","4979":"華星光",
+    "5371":"中光電","2340":"台亞","6449":"鈺邦",
+    # ── 伺服器/網路 ──
+    "2382":"廣達","6669":"緯穎","3231":"緯創","2317":"鴻海",
+    "4938":"和碩","2357":"華碩","2353":"宏碁","2395":"研華",
+    "3026":"禾伸堂","6488":"環球晶",
+    "2308":"台達電","6415":"矽力-KY","3035":"智原",
+    # ── 記憶體/儲存 ──
+    "2344":"華邦電","4973":"廣穎","2337":"旺宏",
+    "5347":"世界先進","8096":"擎亞",
+    # ── 電源/被動 ──
+    "6214":"志豐","3006":"晶豪科","2440":"太空梭","3008":"大立光",
+    "6274":"台耀","3443":"創意","6153":"嘉聯益",
+    # ── EMS/ODM ──
+    "2317":"鴻海","2382":"廣達","2357":"華碩","4938":"和碩",
+    "2353":"宏碁","2385":"群光","2347":"聯強","3231":"緯創",
+    # ── 半導體設備/材料 ──
+    "3596":"智易","6104":"創惟","5274":"信驊","3714":"富采",
+    "6770":"力積電","3533":"嘉澤","2IC":"",
+    # ── 光通訊/電信 ──
+    "4979":"華星光","3491":"昇達科","6669":"緯穎",
+    # ── AI/伺服器概念 ──
+    "6669":"緯穎","3711":"日月光投控","2330":"台積電",
+    "6415":"矽力-KY","5274":"信驊","3443":"創意","4967":"十銓",
+}
+
+# 清理：移除空值 key 與重複（dict 天然去重）
+ELECTRONIC_STOCK_DB = {k: v for k, v in ELECTRONIC_STOCK_DB.items() if k and v and k.isdigit()}
+
+# ==============================================================================
+# 各指標抓取函數（依 API 偵測結果的真實欄位編寫）
+# ==============================================================================
+
+def _fm_fetch(dataset: str, data_id: str, start: str, end: str) -> pd.DataFrame:
     try:
         r = requests.get(FINMIND_URL, params={
             "dataset": dataset, "data_id": data_id,
-            "start_date": start, "end_date": end,
-            "token": FINMIND_TOKEN
+            "start_date": start, "end_date": end, "token": FINMIND_TOKEN
         }, timeout=8)
         d = r.json()
         if d.get("msg") == "success" and d.get("data"):
@@ -842,322 +933,362 @@ def _fm_get(dataset: str, data_id: str, start: str, end: str) -> pd.DataFrame:
         pass
     return pd.DataFrame()
 
-# ── 指標一：大戶持股增加 ──────────────────────────────────────────────────────
-def check_big_holder_increase(stock_id: str, start: str, end: str) -> tuple[bool, str]:
+# ── 指標一：大戶持股增加 ─────────────────────────────────────────────────────
+def check_holder(sid, start, end, probe):
     """
-    使用 TaiwanStockHoldingSharesPer 資料集
-    判斷最近一期「持股 >= 400張(大戶)」的比例是否高於前一期。
+    TaiwanStockHoldingSharesPer
+    真實欄位（由偵測器取得）: HoldingSharesLevel, percent, date, ...
+    大戶定義：HoldingSharesLevel 含 "400" 以上者合計 percent
     """
-    df = _fm_get("TaiwanStockHoldingSharesPer", stock_id, start, end)
-    if df.empty or len(df) < 2:
-        return False, "資料不足"
-    # 過濾大戶級距（400張以上）
-    big_tiers = ["400-600", "600-800", "800-1000", "1000以上"]
-    df_big = df[df['HoldingSharesLevel'].isin(big_tiers)].copy()
+    if not api_ok.get("持股分級"):
+        return False, "API不可用"
+    # 從偵測結果取得真實欄位
+    probe_cols = probe.get("持股分級", {}).get("columns", [])
+    df = _fm_fetch("TaiwanStockHoldingSharesPer", sid, start, end)
+    if df.empty:
+        return False, "無資料"
+    # 動態偵測持股級距欄名
+    level_col = next((c for c in df.columns if "level" in c.lower() or "Level" in c or "持股" in c), None)
+    pct_col   = next((c for c in df.columns if "percent" in c.lower() or "ratio" in c.lower() or "占比" in c), None)
+    date_col  = "date" if "date" in df.columns else df.columns[0]
+    if not level_col or not pct_col:
+        return False, f"找不到欄位(有:{list(df.columns)})"
+    # 大戶：持股 400 張以上各級距
+    big_mask = df[level_col].astype(str).str.extract(r"(\d+)")[0].astype(float, errors="ignore")
+    try:
+        df["_lvl_num"] = df[level_col].astype(str).str.extract(r"^(\d+)")[0].astype(float)
+        df_big = df[df["_lvl_num"] >= 400].copy()
+    except Exception:
+        df_big = df[df[level_col].astype(str).str.contains("400|600|800|1000", na=False)].copy()
     if df_big.empty:
-        return False, "無大戶級距資料"
-    df_big['percent'] = pd.to_numeric(df_big['percent'], errors='coerce').fillna(0)
-    df_big['date'] = pd.to_datetime(df_big['date'])
-    # 按日期分組，加總大戶持股比例
-    daily = df_big.groupby('date')['percent'].sum().sort_index()
+        return False, f"無400張以上級距(level欄={level_col})"
+    df_big[pct_col] = pd.to_numeric(df_big[pct_col], errors="coerce").fillna(0)
+    df_big[date_col] = pd.to_datetime(df_big[date_col])
+    daily = df_big.groupby(date_col)[pct_col].sum().sort_index()
     if len(daily) < 2:
         return False, "期數不足"
-    latest = daily.iloc[-1]
-    prev   = daily.iloc[-2]
-    diff   = latest - prev
-    passed = diff > 0
-    return passed, f"{prev:.2f}% → {latest:.2f}% ({'+' if diff>=0 else ''}{diff:.2f}%)"
+    latest, prev = daily.iloc[-1], daily.iloc[-2]
+    diff = latest - prev
+    return diff > 0, f"{prev:.2f}%→{latest:.2f}% ({'+' if diff>=0 else ''}{diff:.2f}%)"
 
-# ── 指標二：研發費用增加 ──────────────────────────────────────────────────────
-def check_rd_increase(stock_id: str, start: str, end: str) -> tuple[bool, str]:
+# ── 指標二：研發費用增加 ─────────────────────────────────────────────────────
+def check_rd(sid, start, end, probe):
     """
-    使用 TaiwanStockFinancialStatements 的 research_and_development_expense
-    比較最近兩季或兩期的研發費用。
+    TaiwanStockFinancialStatements
+    真實欄位: type, value, date
+    尋找 type 含 research / RD / 研發 的列
     """
-    df = _fm_get("TaiwanStockFinancialStatements", stock_id, start, end)
+    if not api_ok.get("損益表"):
+        return False, "API不可用"
+    df = _fm_fetch("TaiwanStockFinancialStatements", sid, start, end)
     if df.empty:
-        return False, "資料不足"
-    df['date'] = pd.to_datetime(df['date'])
-    # 尋找研發相關欄位
-    rd_keywords = ['research_and_development', 'ResearchAndDevelopment', 'RD']
-    df_rd = df[df['type'].str.contains('|'.join(rd_keywords), case=False, na=False)].copy()
+        return False, "無資料"
+    type_col  = next((c for c in df.columns if "type" in c.lower()), None)
+    value_col = next((c for c in df.columns if "value" in c.lower() or "amount" in c.lower()), None)
+    date_col  = "date" if "date" in df.columns else df.columns[0]
+    if not type_col or not value_col:
+        return False, f"找不到欄位(有:{list(df.columns)})"
+    rd_mask = df[type_col].astype(str).str.contains(
+        "research|ResearchAndDevelopment|RD|研發", case=False, na=False
+    )
+    df_rd = df[rd_mask].copy()
     if df_rd.empty:
-        # 備援：嘗試直接搜尋 value 欄
-        df_rd = df[df['type'].str.contains('研發', na=False)].copy()
-    if df_rd.empty or len(df_rd) < 2:
-        return False, "無研發費用資料"
-    df_rd['value'] = pd.to_numeric(df_rd['value'], errors='coerce').fillna(0)
-    df_rd = df_rd.sort_values('date')
-    latest = df_rd['value'].iloc[-1]
-    prev   = df_rd['value'].iloc[-2]
+        # 列出所有 type 供診斷
+        all_types = df[type_col].unique()[:20].tolist()
+        return False, f"無研發欄(所有type前20:{all_types})"
+    df_rd[value_col] = pd.to_numeric(df_rd[value_col], errors="coerce").fillna(0)
+    df_rd[date_col]  = pd.to_datetime(df_rd[date_col])
+    # 相同 date 可能有多筆，取和
+    grouped = df_rd.groupby(date_col)[value_col].sum().sort_index()
+    if len(grouped) < 2:
+        return False, "期數不足"
+    latest, prev = grouped.iloc[-1], grouped.iloc[-2]
     if prev == 0:
-        return False, "前期研發費用為零"
-    diff_pct = (latest - prev) / abs(prev) * 100
-    passed = latest > prev
-    return passed, f"{prev/1e6:.1f}M → {latest/1e6:.1f}M ({'+' if diff_pct>=0 else ''}{diff_pct:.1f}%)"
+        return False, "前期為零"
+    pct = (latest - prev) / abs(prev) * 100
+    return latest > prev, f"{prev/1e6:.1f}M→{latest/1e6:.1f}M ({'+' if pct>=0 else ''}{pct:.1f}%)"
 
-# ── 指標三：合約負債增加 ──────────────────────────────────────────────────────
-def check_contract_liability_increase(stock_id: str, start: str, end: str) -> tuple[bool, str]:
+# ── 指標三：合約負債增加 ─────────────────────────────────────────────────────
+def check_contract_liability(sid, start, end, probe):
     """
-    使用 TaiwanStockBalanceSheet
-    尋找 ContractLiabilitiesCurrent（合約負債-流動）或 ContractLiabilities
-    比較最近兩期是否增加（預收款項增加 = 訂單能見度提升）。
+    TaiwanStockBalanceSheet
+    真實欄位: type, value, date
+    尋找 type 含 ContractLiabilit / DeferredRevenue / 合約負債 / 預收
     """
-    df = _fm_get("TaiwanStockBalanceSheet", stock_id, start, end)
+    if not api_ok.get("資產負債表"):
+        return False, "API不可用"
+    df = _fm_fetch("TaiwanStockBalanceSheet", sid, start, end)
     if df.empty:
-        return False, "資料不足"
-    df['date'] = pd.to_datetime(df['date'])
-    cl_keywords = ['ContractLiabilit', 'contract_liabilit', '合約負債', 'DeferredRevenue']
-    df_cl = df[df['type'].str.contains('|'.join(cl_keywords), case=False, na=False)].copy()
-    if df_cl.empty or len(df_cl) < 2:
-        return False, "無合約負債資料"
-    df_cl['value'] = pd.to_numeric(df_cl['value'], errors='coerce').fillna(0)
-    df_cl = df_cl.sort_values('date')
-    latest = df_cl['value'].iloc[-1]
-    prev   = df_cl['value'].iloc[-2]
-    diff   = latest - prev
-    passed = diff > 0
-    return passed, f"{prev/1e6:.1f}M → {latest/1e6:.1f}M ({'+' if diff>=0 else ''}{diff/1e6:.1f}M)"
+        return False, "無資料"
+    type_col  = next((c for c in df.columns if "type" in c.lower()), None)
+    value_col = next((c for c in df.columns if "value" in c.lower() or "amount" in c.lower()), None)
+    date_col  = "date" if "date" in df.columns else df.columns[0]
+    if not type_col or not value_col:
+        return False, f"找不到欄位(有:{list(df.columns)})"
+    cl_mask = df[type_col].astype(str).str.contains(
+        "ContractLiabilit|contract_liabilit|合約負債|預收|DeferredRevenue|AdvanceReceipt",
+        case=False, na=False
+    )
+    df_cl = df[cl_mask].copy()
+    if df_cl.empty:
+        all_types = df[type_col].unique()[:20].tolist()
+        return False, f"無合約負債欄(所有type前20:{all_types})"
+    df_cl[value_col] = pd.to_numeric(df_cl[value_col], errors="coerce").fillna(0)
+    df_cl[date_col]  = pd.to_datetime(df_cl[date_col])
+    grouped = df_cl.groupby(date_col)[value_col].sum().sort_index()
+    if len(grouped) < 2:
+        return False, "期數不足"
+    latest, prev = grouped.iloc[-1], grouped.iloc[-2]
+    diff = latest - prev
+    return diff > 0, f"{prev/1e6:.1f}M→{latest/1e6:.1f}M ({'+' if diff>=0 else ''}{diff/1e6:.1f}M)"
 
-# ── 指標四：月營收連續雙增 ────────────────────────────────────────────────────
-def check_revenue_double_increase(stock_id: str, start: str, end: str) -> tuple[bool, str]:
+# ── 指標四：月營收連續雙增 ───────────────────────────────────────────────────
+def check_revenue(sid, rev_start, end, probe):
     """
-    使用 TaiwanStockMonthRevenue
-    判斷最近三個月的月營收是否連續兩個月遞增（M-2 < M-1 < M）。
+    TaiwanStockMonthRevenue
+    真實欄位（通常）: date, stock_id, country, revenue, revenue_month, revenue_year
     """
-    df = _fm_get("TaiwanStockMonthRevenue", stock_id, start, end)
-    if df.empty or len(df) < 3:
-        return False, "資料不足（需≥3個月）"
-    df['date'] = pd.to_datetime(df['date'])
-    df['revenue'] = pd.to_numeric(df['revenue'], errors='coerce').fillna(0)
-    df = df.sort_values('date').reset_index(drop=True)
-    m0 = df['revenue'].iloc[-1]
-    m1 = df['revenue'].iloc[-2]
-    m2 = df['revenue'].iloc[-3]
+    if not api_ok.get("月營收"):
+        return False, "API不可用"
+    df = _fm_fetch("TaiwanStockMonthRevenue", sid, rev_start, end)
+    if df.empty:
+        return False, "無資料"
+    date_col = "date" if "date" in df.columns else df.columns[0]
+    rev_col  = next((c for c in df.columns if "revenue" in c.lower() and "year" not in c.lower() and "month" not in c.lower()), None)
+    if not rev_col:
+        rev_col = next((c for c in df.columns if "revenue" in c.lower()), None)
+    if not rev_col:
+        return False, f"找不到revenue欄(有:{list(df.columns)})"
+    df[rev_col]  = pd.to_numeric(df[rev_col], errors="coerce").fillna(0)
+    df[date_col] = pd.to_datetime(df[date_col])
+    df = df.sort_values(date_col).drop_duplicates(date_col).reset_index(drop=True)
+    if len(df) < 3:
+        return False, f"資料不足(只有{len(df)}月)"
+    m0 = df[rev_col].iloc[-1]
+    m1 = df[rev_col].iloc[-2]
+    m2 = df[rev_col].iloc[-3]
+    d0 = df[date_col].iloc[-1].strftime("%y/%m")
+    d1 = df[date_col].iloc[-2].strftime("%y/%m")
+    d2 = df[date_col].iloc[-3].strftime("%y/%m")
     passed = (m0 > m1 > m2) and m2 > 0
-    d0 = df['date'].iloc[-1].strftime("%y/%m")
-    d1 = df['date'].iloc[-2].strftime("%y/%m")
-    d2 = df['date'].iloc[-3].strftime("%y/%m")
     return passed, f"{m2/1e6:.0f}M({d2})→{m1/1e6:.0f}M({d1})→{m0/1e6:.0f}M({d0})"
 
-# ------------------------------------------------------------------------------
-# 核心篩選引擎
-# ------------------------------------------------------------------------------
-@st.cache_data(ttl=3600)  # 基本面資料變動慢，快取 1 小時
-def run_postmarket_quant_screen():
-    """
-    遍歷電子股資料庫，對每檔股票檢查四個基本面指標，
-    符合 ≥ 2 項者列入觀察名單。
-    """
-    end_date   = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")   # 財報/持股需抓一年
-    rev_start  = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")   # 月營收只需 4 個月
+# ==============================================================================
+# 核心篩選引擎（含進度條）
+# ==============================================================================
+def run_screen_with_progress(stock_db, probe):
+    end_date  = datetime.now().strftime("%Y-%m-%d")
+    start_1y  = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d")
+    start_4m  = (datetime.now() - timedelta(days=150)).strftime("%Y-%m-%d")
+    results   = []
+    stocks    = list(stock_db.items())
+    total     = len(stocks)
 
-    results = []
+    prog_bar  = st.progress(0, text="準備開始掃描...")
+    log_box   = st.empty()
+    log_lines = []
 
-    for stock_id, name in ELECTRONIC_STOCK_DB.items():
+    for i, (sid, name) in enumerate(stocks):
+        prog_bar.progress((i + 1) / total, text=f"掃描中 {i+1}/{total}：{name}({sid})")
+
         row = {
-            "代號": stock_id, "公司": name,
-            "大戶增": False, "大戶增_說明": "-",
-            "研發增": False, "研發增_說明": "-",
+            "代號": sid, "公司": name,
+            "大戶增": False,    "大戶增_說明": "-",
+            "研發增": False,    "研發增_說明": "-",
             "合約負債增": False, "合約負債增_說明": "-",
             "月營收雙增": False, "月營收雙增_說明": "-",
             "符合項數": 0
         }
 
-        # 指標一：大戶持股
-        ok, note = check_big_holder_increase(stock_id, start_date, end_date)
-        row["大戶增"], row["大戶增_說明"] = ok, note
+        ok1, n1 = check_holder(sid, start_1y, end_date, probe)
+        row["大戶增"], row["大戶增_說明"] = ok1, n1
 
-        # 指標二：研發費用
-        ok, note = check_rd_increase(stock_id, start_date, end_date)
-        row["研發增"], row["研發增_說明"] = ok, note
+        ok2, n2 = check_rd(sid, start_1y, end_date, probe)
+        row["研發增"], row["研發增_說明"] = ok2, n2
 
-        # 指標三：合約負債
-        ok, note = check_contract_liability_increase(stock_id, start_date, end_date)
-        row["合約負債增"], row["合約負債增_說明"] = ok, note
+        ok3, n3 = check_contract_liability(sid, start_1y, end_date, probe)
+        row["合約負債增"], row["合約負債增_說明"] = ok3, n3
 
-        # 指標四：月營收雙增
-        ok, note = check_revenue_double_increase(stock_id, rev_start, end_date)
-        row["月營收雙增"], row["月營收雙增_說明"] = ok, note
+        ok4, n4 = check_revenue(sid, start_4m, end_date, probe)
+        row["月營收雙增"], row["月營收雙增_說明"] = ok4, n4
 
-        # 統計符合項數
-        row["符合項數"] = sum([row["大戶增"], row["研發增"], row["合約負債增"], row["月營收雙增"]])
+        row["符合項數"] = int(ok1) + int(ok2) + int(ok3) + int(ok4)
+
+        # 即時 log
+        icons = "".join([
+            ("🟢" if ok1 else "⚫"), ("🔬" if ok2 else "⚫"),
+            ("📋" if ok3 else "⚫"), ("📈" if ok4 else "⚫")
+        ])
+        line = f"{icons} {name}({sid}) → {row['符合項數']}/4 項"
+        log_lines.append(line)
+        if len(log_lines) > 12:
+            log_lines = log_lines[-12:]
+        log_box.code("\n".join(log_lines), language=None)
+
         results.append(row)
 
-    df_all = pd.DataFrame(results)
-    # 篩選符合 ≥ 2 項
-    df_pass = df_all[df_all["符合項數"] >= 2].sort_values("符合項數", ascending=False).reset_index(drop=True)
-    return df_all, df_pass
+    prog_bar.progress(1.0, text=f"✅ 掃描完成！共 {total} 檔")
+    log_box.empty()
+    return pd.DataFrame(results)
 
-# ------------------------------------------------------------------------------
-# 執行篩選 & 展示介面
-# ------------------------------------------------------------------------------
-CONDITION_LABELS = {
-    "大戶增":    ("🐋 大戶持股增加",  "#ff4b4b"),
-    "研發增":    ("🔬 研發費用增加",  "#4b9eff"),
-    "合約負債增": ("📋 合約負債增加",  "#f5a623"),
-    "月營收雙增": ("📈 月營收連續雙增", "#00c49f"),
-}
+# ==============================================================================
+# 介面控制
+# ==============================================================================
+with st.expander("⚙️ 四項指標說明", expanded=False):
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.info("**🐋 大戶持股增**
+持股≥400張級距合計比例較前期上升，主力資金積累訊號。")
+    with c2: st.info("**🔬 研發費用增**
+最新一季研發支出高於前一季，企業持續投資競爭力。")
+    with c3: st.info("**📋 合約負債增**
+預收款/合約負債較前期增加，訂單能見度與客戶黏著度提升。")
+    with c4: st.info("**📈 月營收雙增**
+連續三個月 M-2 < M-1 < M，趨勢向上動能確認。")
 
-with st.expander("⚙️ 電子股四指標篩選引擎設定說明", expanded=False):
-    col_hint1, col_hint2, col_hint3, col_hint4 = st.columns(4)
-    hints = [
-        ("🐋 大戶增", "持股≥400張的大戶合計持股比例\n較前期上升，代表主力資金積累。"),
-        ("🔬 研發增", "最新一季研發費用高於前一季，\n代表公司持續投資未來競爭力。"),
-        ("📋 合約負債增", "資產負債表中合約負債/預收款\n較前期增加，代表訂單能見度提升。"),
-        ("📈 月營收雙增", "最近三個月月營收連續兩個月\n遞增（M-2 < M-1 < M），趨勢向上。"),
-    ]
-    for col, (title, desc) in zip([col_hint1, col_hint2, col_hint3, col_hint4], hints):
-        with col:
-            st.info(f"**{title}**\n\n{desc}")
-
-# 手動刷新按鈕
-col_btn1, col_btn2, _ = st.columns([1, 1, 4])
+col_btn1, col_btn2, col_min, _ = st.columns([1.2, 1.2, 0.8, 3])
 with col_btn1:
-    run_screen = st.button("🚀 立即執行篩選", type="primary", use_container_width=True)
+    do_run = st.button("🚀 執行全市場篩選", type="primary", use_container_width=True)
 with col_btn2:
-    clear_cache = st.button("🔄 清除快取重抓", use_container_width=True)
+    do_clear = st.button("🔄 清除結果重掃", use_container_width=True)
+with col_min:
+    min_cond = st.number_input("最低符合項數", min_value=1, max_value=4, value=2, step=1)
 
-if clear_cache:
-    run_postmarket_quant_screen.clear()
+if do_clear:
+    if "screen_df" in st.session_state:
+        del st.session_state["screen_df"]
     st.rerun()
 
-# 進度顯示
-screen_placeholder = st.empty()
-with screen_placeholder.container():
-    with st.spinner(f"🔍 正在掃描 {len(ELECTRONIC_STOCK_DB)} 檔電子股四大指標，請稍候（約 30–90 秒）..."):
-        df_screen_all, df_screen_pass = run_postmarket_quant_screen()
+if do_run or ("screen_df" not in st.session_state):
+    if do_run:
+        if "screen_df" in st.session_state:
+            del st.session_state["screen_df"]
+    if "screen_df" not in st.session_state:
+        df_all_screen = run_screen_with_progress(ELECTRONIC_STOCK_DB, probe_results)
+        st.session_state["screen_df"] = df_all_screen
 
-screen_placeholder.empty()
+df_all_screen = st.session_state.get("screen_df", pd.DataFrame())
 
-# ── 總覽指標卡 ────────────────────────────────────────────────────────────────
-total_stocks   = len(df_screen_all)
-pass_stocks    = len(df_screen_pass)
-full_pass      = len(df_screen_all[df_screen_all["符合項數"] == 3])
-double_pass    = len(df_screen_all[df_screen_all["符合項數"] == 2])
-triple_pass    = len(df_screen_all[df_screen_all["符合項數"] == 1])
+if not df_all_screen.empty:
+    df_pass_screen = df_all_screen[df_all_screen["符合項數"] >= min_cond].sort_values(
+        "符合項數", ascending=False).reset_index(drop=True)
 
-ov1, ov2, ov3, ov4, ov5 = st.columns(5)
-with ov1: st.metric("📦 掃描股票總數", f"{total_stocks} 檔")
-with ov2: st.metric("✅ 符合 ≥2 項", f"{pass_stocks} 檔", delta=f"通過率 {pass_stocks/total_stocks*100:.1f}%", delta_color="inverse")
-with ov3: st.metric("🥈 符合 2 項", f"{double_pass} 檔")
-with ov4: st.metric("🥇 符合 3 項", f"{triple_pass} 檔")
-with ov5: st.metric("👑 四項全中", f"{full_pass} 檔", delta="最強基本面候選" if full_pass > 0 else "暫無")
+    total_s  = len(df_all_screen)
+    pass_s   = len(df_pass_screen)
+    cnt4 = len(df_all_screen[df_all_screen["符合項數"]==4])
+    cnt3 = len(df_all_screen[df_all_screen["符合項數"]==3])
+    cnt2 = len(df_all_screen[df_all_screen["符合項數"]==2])
 
-st.markdown("---")
+    m1,m2,m3,m4,m5 = st.columns(5)
+    with m1: st.metric("📦 掃描總數", f"{total_s} 檔")
+    with m2: st.metric(f"✅ 符合≥{min_cond}項", f"{pass_s} 檔", delta=f"{pass_s/total_s*100:.1f}%", delta_color="inverse")
+    with m3: st.metric("🥈 符合2項", f"{cnt2} 檔")
+    with m4: st.metric("🥇 符合3項", f"{cnt3} 檔")
+    with m5: st.metric("👑 四項全中", f"{cnt4} 檔", delta="強力候選" if cnt4>0 else "暫無")
 
-# ── 篩選結果主表 ─────────────────────────────────────────────────────────────
-if df_screen_pass.empty:
-    st.warning("⚠️ 目前電子股資料庫中，暫無股票同時符合四項指標中的兩項以上。建議稍後重新執行或擴充股票資料庫。")
-else:
-    st.markdown(f"#### 🏆 符合 ≥ 2 項基本面指標的電子股（共 {pass_stocks} 檔）")
+    st.markdown("---")
 
-    # 分頁展示：全部 / 四中四 / 四中三
-    tab_all, tab_4, tab_3 = st.tabs([
-        f"📋 符合3項 ({pass_stocks})",
-        f"👑 符合2項 ({full_pass})",
-        f"🥇 符合1項 ({triple_pass})"
-    ])
-
-    def _render_pass_table(df_subset: pd.DataFrame):
-        if df_subset.empty:
-            st.info("此分類目前無符合股票。")
-            return
-
-        # 建立展示用 DataFrame
-        rows = []
-        for _, r in df_subset.iterrows():
-            def tag(ok, label): return f"{'✅' if ok else '❌'} {label}"
-            rows.append({
-                "代號":     r["代號"],
-                "公司":     r["公司"],
-                "符合項數": f"{'⭐' * int(r['符合項數'])} {int(r['符合項數'])}/4",
-                "大戶持股": tag(r["大戶增"],    r["大戶增_說明"]),
-                "研發費用": tag(r["研發增"],    r["研發增_說明"]),
-                "合約負債": tag(r["合約負債增"], r["合約負債增_說明"]),
-                "月營收":   tag(r["月營收雙增"], r["月營收雙增_說明"]),
+    # ── 完整掃描明細（全部股票，含未通過，方便診斷） ──
+    with st.expander("📊 完整掃描明細（含未通過股票，診斷資料是否正確抓到）", expanded=False):
+        diag_rows = []
+        for _, r in df_all_screen.iterrows():
+            diag_rows.append({
+                "代號": r["代號"], "公司": r["公司"],
+                "符合": f"{int(r['符合項數'])}/4",
+                "🐋大戶": f"{'✅' if r['大戶增'] else '❌'} {r['大戶增_說明']}",
+                "🔬研發": f"{'✅' if r['研發增'] else '❌'} {r['研發增_說明']}",
+                "📋合約負債": f"{'✅' if r['合約負債增'] else '❌'} {r['合約負債增_說明']}",
+                "📈月營收": f"{'✅' if r['月營收雙增'] else '❌'} {r['月營收雙增_說明']}",
             })
-        df_show = pd.DataFrame(rows)
-        st.dataframe(df_show, use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(diag_rows), use_container_width=True, hide_index=True)
 
-        # 雷達圖：各指標通過率
-        labels = ["大戶增", "研發增", "合約負債增", "月營收雙增"]
-        values = [df_subset[c].sum() for c in labels]
-        fig_radar = go.Figure(go.Scatterpolar(
-            r=values + [values[0]],
-            theta=["🐋 大戶持股增", "🔬 研發費用增", "📋 合約負債增", "📈 月營收雙增", "🐋 大戶持股增"],
-            fill='toself', fillcolor='rgba(255,75,75,0.2)',
-            line=dict(color='#ff4b4b', width=2),
-            name="通過家數"
+    # ── 符合名單主表 ──
+    if df_pass_screen.empty:
+        st.warning(f"⚠️ 目前無股票符合 ≥{min_cond} 項條件，可調低「最低符合項數」或重新掃描。")
+    else:
+        st.markdown(f"#### 🏆 符合 ≥{min_cond} 項基本面指標 — 共 **{pass_s}** 檔")
+
+        tab_all_r, tab_4r, tab_3r = st.tabs([
+            f"📋 全部名單 ({pass_s})", f"👑 四項全中 ({cnt4})", f"🥇 符合三項 ({cnt3})"
+        ])
+
+        def _render_table(df_sub):
+            if df_sub.empty:
+                st.info("此分類目前無符合股票。")
+                return
+            rows = []
+            for _, r in df_sub.iterrows():
+                rows.append({
+                    "代號": r["代號"], "公司": r["公司"],
+                    "符合項數": f"{'⭐'*int(r['符合項數'])} {int(r['符合項數'])}/4",
+                    "🐋大戶持股": ("✅ " if r["大戶增"] else "❌ ") + str(r["大戶增_說明"]),
+                    "🔬研發費用": ("✅ " if r["研發增"] else "❌ ") + str(r["研發增_說明"]),
+                    "📋合約負債": ("✅ " if r["合約負債增"] else "❌ ") + str(r["合約負債增_說明"]),
+                    "📈月營收":   ("✅ " if r["月營收雙增"] else "❌ ") + str(r["月營收雙增_說明"]),
+                })
+            df_show = pd.DataFrame(rows)
+            st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+            # 橫條圖
+            fig_b = go.Figure(go.Bar(
+                y=df_sub["公司"]+"("+df_sub["代號"]+")",
+                x=df_sub["符合項數"].astype(int),
+                orientation="h",
+                marker_color=["#ff4b4b" if x==4 else ("#ff8c42" if x==3 else "#f5a623")
+                              for x in df_sub["符合項數"].astype(int)],
+                text=df_sub["符合項數"].astype(int).apply(lambda x: f"{x}/4"),
+                textposition="auto"
+            ))
+            fig_b.update_layout(
+                height=max(260, len(df_sub)*28+60),
+                xaxis=dict(range=[0,4.5], tickvals=[1,2,3,4]),
+                margin=dict(l=10,r=10,t=30,b=10),
+                title="個股符合項數排行"
+            )
+
+            # 雷達圖
+            conds = ["大戶增","研發增","合約負債增","月營收雙增"]
+            vals  = [int(df_sub[c].sum()) for c in conds]
+            fig_r = go.Figure(go.Scatterpolar(
+                r=vals+[vals[0]],
+                theta=["🐋大戶","🔬研發","📋合約負債","📈月營收","🐋大戶"],
+                fill="toself", fillcolor="rgba(255,75,75,0.15)",
+                line=dict(color="#ff4b4b",width=2)
+            ))
+            fig_r.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[0, max(vals)+1])),
+                height=300, margin=dict(l=30,r=30,t=30,b=30),
+                title="各指標通過家數雷達"
+            )
+            cc1, cc2 = st.columns(2)
+            with cc1: st.plotly_chart(fig_b, use_container_width=True, key=f"b_{len(df_sub)}_{df_sub.iloc[0]['代號'] if len(df_sub)>0 else 'x'}")
+            with cc2: st.plotly_chart(fig_r, use_container_width=True, key=f"r_{len(df_sub)}_{df_sub.iloc[0]['代號'] if len(df_sub)>0 else 'x'}")
+
+            csv_out = df_show.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button("📥 下載 CSV", csv_out,
+                               f"screen_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", "text/csv")
+
+        with tab_all_r: _render_table(df_pass_screen)
+        with tab_4r:    _render_table(df_all_screen[df_all_screen["符合項數"]==4].reset_index(drop=True))
+        with tab_3r:    _render_table(df_all_screen[df_all_screen["符合項數"]==3].reset_index(drop=True))
+
+        # 全市場各指標通過率
+        st.markdown("#### 📊 全市場各指標通過率")
+        cond_cols  = ["大戶增","研發增","合約負債增","月營收雙增"]
+        cond_names = ["🐋大戶持股增","🔬研發費用增","📋合約負債增","📈月營收雙增"]
+        cond_vals_  = [int(df_all_screen[c].sum()) for c in cond_cols]
+        cond_pcts_  = [v/total_s*100 for v in cond_vals_]
+        fig_ov = go.Figure(go.Bar(
+            x=cond_names, y=cond_pcts_,
+            marker_color=["#ff4b4b","#4b9eff","#f5a623","#00c49f"],
+            text=[f"{v}檔({p:.1f}%)" for v,p in zip(cond_vals_,cond_pcts_)],
+            textposition="auto"
         ))
-        fig_radar.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, max(values) + 1])),
-            height=320, margin=dict(l=40, r=40, t=30, b=30),
-            title="本次篩選各指標通過家數雷達圖"
-        )
-
-        # 橫條圖：個股符合項數排行
-        fig_bar = go.Figure(go.Bar(
-            y=df_subset["公司"] + "(" + df_subset["代號"] + ")",
-            x=df_subset["符合項數"].astype(int),
-            orientation='h',
-            marker=dict(
-                color=df_subset["符合項數"].astype(int),
-                colorscale=[[0, '#f5a623'], [0.5, '#ff6b35'], [1, '#ff4b4b']],
-                showscale=False
-            ),
-            text=df_subset["符合項數"].astype(int).apply(lambda x: f"{x}/4 項"),
-            textposition='auto'
-        ))
-        fig_bar.update_layout(
-            height=max(250, len(df_subset) * 30 + 60),
-            margin=dict(l=10, r=10, t=30, b=10),
-            title="各股符合指標項數排行",
-            xaxis=dict(range=[0, 4.5], tickvals=[1,2,3,4])
-        )
-
-        chart_col1, chart_col2 = st.columns([1, 1])
-        with chart_col1: st.plotly_chart(fig_radar, use_container_width=True, key=f"radar_{id(df_subset)}")
-        with chart_col2: st.plotly_chart(fig_bar,   use_container_width=True, key=f"bar_{id(df_subset)}")
-
-        # 下載按鈕
-        csv_data = df_show.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(
-            label="📥 下載篩選結果 CSV",
-            data=csv_data,
-            file_name=f"quant_screen_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
-            use_container_width=False
-        )
-
-    with tab_all: _render_pass_table(df_screen_pass)
-    with tab_4:   _render_pass_table(df_screen_all[df_screen_all["符合項數"] == 4].reset_index(drop=True))
-    with tab_3:   _render_pass_table(df_screen_all[df_screen_all["符合項數"] == 3].reset_index(drop=True))
-
-    # ── 各指標符合統計 bar ──────────────────────────────────────────────────
-    st.markdown("#### 📊 全資料庫各指標通過率統計")
-    cond_cols = ["大戶增", "研發增", "合約負債增", "月營收雙增"]
-    cond_names = ["🐋 大戶持股增", "🔬 研發費用增", "📋 合約負債增", "📈 月營收雙增"]
-    cond_vals  = [df_screen_all[c].sum() for c in cond_cols]
-    cond_pcts  = [v / total_stocks * 100 for v in cond_vals]
-
-    fig_cond = go.Figure(go.Bar(
-        x=cond_names, y=cond_pcts,
-        marker_color=['#ff4b4b', '#4b9eff', '#f5a623', '#00c49f'],
-        text=[f"{v}檔 ({p:.1f}%)" for v, p in zip(cond_vals, cond_pcts)],
-        textposition='auto'
-    ))
-    fig_cond.update_layout(
-        height=260, yaxis_title="通過率 (%)",
-        margin=dict(l=10, r=10, t=10, b=10),
-        yaxis=dict(range=[0, 100])
-    )
-    st.plotly_chart(fig_cond, use_container_width=True, key="cond_overview_bar")
+        fig_ov.update_layout(height=260, yaxis=dict(range=[0,100],title="通過率 (%)"),
+                              margin=dict(l=10,r=10,t=10,b=10))
+        st.plotly_chart(fig_ov, use_container_width=True, key="ov_bar_final")
 
 st.markdown(
-    "<small>⚠️ 資料來源：FinMind API（財報資料有季度延遲，月營收為最新公告）。"
-    "本看板僅供量化篩選參考，不構成投資建議。</small>",
+    "<small>⚠️ 資料來源：FinMind API。財報資料有季度延遲；月營收為最新公告。本看板僅供量化篩選參考，不構成投資建議。</small>",
     unsafe_allow_html=True
 )
 
