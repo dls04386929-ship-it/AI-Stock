@@ -1034,9 +1034,9 @@ screen_placeholder.empty()
 # ── 總覽指標卡 ────────────────────────────────────────────────────────────────
 total_stocks   = len(df_screen_all)
 pass_stocks    = len(df_screen_pass)
-full_pass      = len(df_screen_all[df_screen_all["符合項數"] == 4])
+full_pass      = len(df_screen_all[df_screen_all["符合項數"] == 3])
 double_pass    = len(df_screen_all[df_screen_all["符合項數"] == 2])
-triple_pass    = len(df_screen_all[df_screen_all["符合項數"] == 3])
+triple_pass    = len(df_screen_all[df_screen_all["符合項數"] == 1])
 
 ov1, ov2, ov3, ov4, ov5 = st.columns(5)
 with ov1: st.metric("📦 掃描股票總數", f"{total_stocks} 檔")
@@ -1055,9 +1055,9 @@ else:
 
     # 分頁展示：全部 / 四中四 / 四中三
     tab_all, tab_4, tab_3 = st.tabs([
-        f"📋 全部符合名單 ({pass_stocks})",
-        f"👑 四項全中 ({full_pass})",
-        f"🥇 符合三項 ({triple_pass})"
+        f"📋 符合3項 ({pass_stocks})",
+        f"👑 符合2項 ({full_pass})",
+        f"🥇 符合1項 ({triple_pass})"
     ])
 
     def _render_pass_table(df_subset: pd.DataFrame):
