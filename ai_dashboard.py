@@ -95,37 +95,43 @@ def get_backup_chips_data():
 @st.cache_data(ttl=1800)
 def fetch_tw_chip_data_automated():
     url = "https://api.finmindtrade.com/api/v4/data"
-    target_date = datetime.now()
-    if target_date.hour < 16:
-        target_date = target_date - timedelta(days=1)
-    date_str = target_date.strftime("%Y-%m-%d")
-    
-    parameter = {
-        "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
-        "data_id": "", "start_date": date_str, "end_date": date_str, "token": FINMIND_TOKEN
-    }
-    try:
-        response = requests.get(url, params=parameter, timeout=10)
-        data = response.json()
-        if data.get("msg") == "success" and len(data.get("data", [])) > 0:
-            df = pd.DataFrame(data["data"])
-            df['買賣超(億)'] = (df['buy'] - df['sell']) / 100000000
-            df_grouped = df.groupby('name')['買賣超(億)'].sum().reset_index()
-            df_grouped.columns = ['族群', '大戶差 (億)']
+    # 邏輯修正：由今天往回推算，直到抓到有資料的最近日期為止
+    for i in range(0, 5): 
+        target_date = datetime.now() - timedelta(days=i)
+        date_str = target_date.strftime("%Y-%m-%d")
+        
+        parameter = {
+            "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+            "data_id": "", "start_date": date_str, "end_date": date_str, "token": FINMIND_TOKEN
+        }
+        
+        try:
+            response = requests.get(url, params=parameter, timeout=10)
+            data = response.json()
+            if data.get("msg") == "success" and len(data.get("data", [])) > 0:
+                df = pd.DataFrame(data["data"])
+                # 確保數值轉換正確
+                df['buy'] = pd.to_numeric(df['buy'], errors='coerce')
+                df['sell'] = pd.to_numeric(df['sell'], errors='coerce')
+                df['買賣超(億)'] = (df['buy'] - df['sell']) / 100000000
+                
+                df_grouped = df.groupby('name')['買賣超(億)'].sum().reset_index()
+                df_grouped.columns = ['族群', '大戶差 (億)']
+                
+                df_buy_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=False).head(5).copy()
+                df_sell_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=True).head(5).copy()
+                
+                df_buy_top5['排名'] = range(1, len(df_buy_top5) + 1)
+                df_sell_top5['排名'] = range(1, len(df_sell_top5) + 1)
+                
+                df_buy_top5['大戶差 (億)'] = df_buy_top5['大戶差 (億)'].apply(lambda x: f"+{x:.2f} 億")
+                df_sell_top5['大戶差 (億)'] = df_sell_top5['大戶差 (億)'].apply(lambda x: f"{x:.2f} 億")
+                
+                return df_buy_top5, df_sell_top5, f"{date_str} (最新有效數據)"
+        except:
+            continue
             
-            df_buy_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=False).head(5).copy()
-            df_sell_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=True).head(5).copy()
-            
-            df_buy_top5['排名'] = range(1, len(df_buy_top5) + 1)
-            df_sell_top5['排名'] = range(1, len(df_sell_top5) + 1)
-            
-            df_buy_top5['大戶差 (億)'] = df_buy_top5['大戶差 (億)'].apply(lambda x: f"+{x:.2f} 億")
-            df_sell_top5['大戶差 (億)'] = df_sell_top5['大戶差 (億)'].apply(lambda x: f"{x:.2f} 億")
-            return df_buy_top5, df_sell_top5, date_str
-        else:
-            return get_backup_chips_data()
-    except:
-        return get_backup_chips_data()
+    return get_backup_chips_data()
 
 df_automated_buy, df_automated_sell, chip_date_info = fetch_tw_chip_data_automated()
 
