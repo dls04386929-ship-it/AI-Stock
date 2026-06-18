@@ -71,110 +71,9 @@ with st.container():
 
 st.markdown("---")
 
-# ==============================================================================
-# 三、自動串接台灣本土財經 API 函數 (盤後大戶籌碼)
-# ==============================================================================
-def get_backup_chips_data():
-    backup_buy = [
-        {"排名": 1, "族群": "元宇宙", "大戶差 (億)": 360.9},
-        {"排名": 2, "族群": "5G手機", "大戶差 (億)": 358.9},
-        {"排名": 3, "族群": "MIH平台概念股", "大戶差 (億)": 303.6},
-        {"排名": 4, "族群": "被動元件(C/R)", "大戶差 (億)": 267.0},
-        {"排名": 5, "族群": "MLCC", "大戶差 (億)": 246.3},
-    ]
-    backup_sell = [
-        {"排名": 1, "族群": "IC封測", "大戶差 (億)": -83.55},
-        {"排名": 2, "族群": "低軌道衛星", "大戶差 (億)": -42.85},
-        {"排名": 3, "族群": "NAND Flash控制IC", "大戶差 (億)": -28.77},
-        {"排名": 4, "族群": "雲端運算", "大戶差 (億)": -27.94},
-        {"排名": 5, "族群": "探針卡", "大戶差 (億)": -26.86},
-    ]
-    return pd.DataFrame(backup_buy), pd.DataFrame(backup_sell), "2026-06-15 (歷史基準)"
-
-@st.cache_data(ttl=1800)
-def fetch_tw_chip_data_automated():
-    """
-    ✅ BUG FIX 1：
-    原始問題：dataset='TaiwanStockInstitutionalInvestorsBuySell' 傳入 data_id=""
-    會導致 API 回傳全市場所有股票資料（資料量龐大且格式不同），
-    正確做法應使用 TaiwanStockMarketValueWeight 或
-    TaiwanStockTotalInstitutionalInvestorsBuySell（不需 data_id）來取得大盤總體籌碼。
-    改用 TaiwanStockTotalInstitutionalInvestors 按 name 分組取買賣超合計。
-    """
-    url = "https://api.finmindtrade.com/api/v4/data"
-
-    for i in range(0, 5):
-        target_date = datetime.now() - timedelta(days=i)
-        # 跳過週末（FinMind 台股 API 週末無資料）
-        if target_date.weekday() >= 5:
-            continue
-        date_str = target_date.strftime("%Y-%m-%d")
-
-        # ✅ 修正：改用正確的 dataset，不傳 data_id
-        parameter = {
-            "dataset": "TaiwanStockTotalInstitutionalInvestors",
-            "start_date": date_str,
-            "end_date": date_str,
-            "token": FINMIND_TOKEN
-        }
-
-        try:
-            response = requests.get(url, params=parameter, timeout=10)
-            data = response.json()
-
-            with st.sidebar:
-                st.write(f"正在查詢日期: {date_str}")
-                st.write(f"API 回傳狀態: {data.get('msg')}")
-                if data.get("data"):
-                    st.write(f"抓到資料筆數: {len(data.get('data'))}")
-                else:
-                    st.write("未抓到資料或資料為空")
-
-            if data.get("msg") == "success" and len(data.get("data", [])) > 0:
-                df = pd.DataFrame(data["data"])
-
-                # ✅ 修正：欄位名稱依實際 API 回傳調整
-                # TaiwanStockTotalInstitutionalInvestors 欄位：
-                # name, buy, sell, date
-                df['buy'] = pd.to_numeric(df['buy'], errors='coerce').fillna(0)
-                df['sell'] = pd.to_numeric(df['sell'], errors='coerce').fillna(0)
-                df['買賣超(億)'] = (df['buy'] - df['sell']) / 100000000
-
-                df_grouped = df.groupby('name')['買賣超(億)'].sum().reset_index()
-                df_grouped.columns = ['族群', '大戶差 (億)']
-
-                df_buy_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=False).head(5).copy().reset_index(drop=True)
-                df_sell_top5 = df_grouped.sort_values(by='大戶差 (億)', ascending=True).head(5).copy().reset_index(drop=True)
-
-                df_buy_top5.insert(0, '排名', range(1, len(df_buy_top5) + 1))
-                df_sell_top5.insert(0, '排名', range(1, len(df_sell_top5) + 1))
-
-                df_buy_top5['大戶差 (億)'] = df_buy_top5['大戶差 (億)'].apply(lambda x: f"+{x:.2f} 億")
-                df_sell_top5['大戶差 (億)'] = df_sell_top5['大戶差 (億)'].apply(lambda x: f"{x:.2f} 億")
-
-                return df_buy_top5, df_sell_top5, f"{date_str} (最新有效數據)"
-
-        except Exception as e:
-            with st.sidebar:
-                st.write(f"例外錯誤: {e}")
-            continue
-
-    return get_backup_chips_data()
-
-df_automated_buy, df_automated_sell, chip_date_info = fetch_tw_chip_data_automated()
-
-st.markdown(f"### 🎯 每日盤後大戶資金流向統計 (API 全自動更新 | 籌碼基準日: {chip_date_info})")
-col_buy, col_sell = st.columns(2)
-with col_buy:
-    st.success("🛒 盤後大戶買超 TOP 5 (資金流入主攻部隊)")
-    st.dataframe(df_automated_buy, use_container_width=True, hide_index=True)
-with col_sell:
-    st.error("📉 盤後大戶賣超 TOP 5 (資金流出/防範調節)")
-    st.dataframe(df_automated_sell, use_container_width=True, hide_index=True)
-st.markdown("---")
 
 # ==============================================================================
-# 四、大盤與夜盤監控配置
+# 三、大盤與夜盤監控配置
 # ==============================================================================
 INDEX_CONFIG = {
     '^GSPC': {'name': '美股 S&P 500', 'type': '大盤'},
@@ -219,7 +118,7 @@ if not idx_market_data.empty:
 st.markdown("---")
 
 # ==============================================================================
-# 五、焦點核心池板塊配置庫
+# 四、焦點核心池板塊配置庫
 # ==============================================================================
 TW_STOCK_CONFIG = {
     '1. 被動元件 (多頭總司令)': {
@@ -274,6 +173,159 @@ GLOBAL_STOCK_CONFIG = {
         '7731.T': {'name': 'Nikon (精密光學與半導體鏡頭)', 'nation': '日'}
     }
 }
+
+# ==============================================================================
+# 五、自動串接台灣本土財經 API 函數 (盤後大戶籌碼)
+# ==============================================================================
+def get_backup_chips_data():
+    backup_buy = [
+        {"排名": 1, "族群": "元宇宙", "大戶差 (億)": 360.9},
+        {"排名": 2, "族群": "5G手機", "大戶差 (億)": 358.9},
+        {"排名": 3, "族群": "MIH平台概念股", "大戶差 (億)": 303.6},
+        {"排名": 4, "族群": "被動元件(C/R)", "大戶差 (億)": 267.0},
+        {"排名": 5, "族群": "MLCC", "大戶差 (億)": 246.3},
+    ]
+    backup_sell = [
+        {"排名": 1, "族群": "IC封測", "大戶差 (億)": -83.55},
+        {"排名": 2, "族群": "低軌道衛星", "大戶差 (億)": -42.85},
+        {"排名": 3, "族群": "NAND Flash控制IC", "大戶差 (億)": -28.77},
+        {"排名": 4, "族群": "雲端運算", "大戶差 (億)": -27.94},
+        {"排名": 5, "族群": "探針卡", "大戶差 (億)": -26.86},
+    ]
+    return pd.DataFrame(backup_buy), pd.DataFrame(backup_sell), "（無法連線，顯示歷史備援資料）"
+
+@st.cache_data(ttl=1800)
+def fetch_tw_chip_data_automated():
+    """
+    ✅ 重大修正（取代先前完全錯誤的設計）：
+
+    之前的版本誤用 dataset='TaiwanStockTotalInstitutionalInvestors'，
+    這個 API 回傳的是「整個大盤」三大法人(外資/投信/自營商)買賣超總和，
+    它的 name 欄位是法人類別名稱（如 Foreign_Investor），
+    根本不是產業族群，所以不可能產生「元宇宙、被動元件」這種族群排行——
+    這是上一輪修正時的設計錯誤，數值因此完全失真或顯示備援假資料。
+
+    正確做法：FinMind 沒有「依產業族群統計法人買賣超」的現成 API，
+    必須改為「逐股呼叫個股法人買賣超 dataset (TaiwanStockInstitutionalInvestorsBuySell)，
+    再依我們已定義的 TW_STOCK_CONFIG 產業分類，加總外資買賣超金額」，
+    這樣才能得出真實且有意義的「族群資金流向」排行。
+
+    回傳：依族群加總「外資買賣超(億)」排序的買超/賣超 TOP5，
+    並附上實際抓取的個股級原始明細，供右側展開查驗。
+    """
+    url = "https://api.finmindtrade.com/api/v4/data"
+
+    # 往前找最近一個有效交易日（跳過週末）
+    valid_date = None
+    for i in range(0, 6):
+        d = datetime.now() - timedelta(days=i)
+        if d.weekday() < 5:
+            valid_date = d
+            break
+    if valid_date is None:
+        valid_date = datetime.now()
+    date_str = valid_date.strftime("%Y-%m-%d")
+    start_str = (valid_date - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    group_results = []   # [{族群, 代號, 公司, 外資買賣超(億), 日期}]
+    fetch_log = []       # 偵錯用：記錄每檔股票實際抓取狀況
+
+    for group, stocks in TW_STOCK_CONFIG.items():
+        for sid_full, name in stocks.items():
+            sid = sid_full.split('.')[0]
+            try:
+                r = requests.get(url, params={
+                    "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+                    "data_id": sid,
+                    "start_date": start_str,
+                    "end_date": date_str,
+                    "token": FINMIND_TOKEN
+                }, timeout=8)
+                d = r.json()
+
+                if d.get("msg") == "success" and d.get("data"):
+                    df_s = pd.DataFrame(d["data"])
+                    # 真實欄位通常為: date, stock_id, name(法人類別), buy, sell
+                    name_col = next((c for c in df_s.columns if c.lower() == "name"), None)
+                    buy_col  = next((c for c in df_s.columns if c.lower() == "buy"), None)
+                    sell_col = next((c for c in df_s.columns if c.lower() == "sell"), None)
+                    date_col = "date" if "date" in df_s.columns else None
+
+                    if name_col and buy_col and sell_col and date_col:
+                        df_s[buy_col]  = pd.to_numeric(df_s[buy_col], errors="coerce").fillna(0)
+                        df_s[sell_col] = pd.to_numeric(df_s[sell_col], errors="coerce").fillna(0)
+                        # 篩選外資（含外資及陸資）
+                        df_foreign = df_s[df_s[name_col].astype(str).str.contains(
+                            "Foreign_Investor|外資", case=False, na=False)].copy()
+                        if not df_foreign.empty:
+                            # 取最新一筆日期
+                            df_foreign[date_col] = pd.to_datetime(df_foreign[date_col])
+                            df_foreign = df_foreign.sort_values(date_col)
+                            latest_row = df_foreign.iloc[-1]
+                            net_amt_yi = (latest_row[buy_col] - latest_row[sell_col]) / 1e8
+                            group_results.append({
+                                "族群": group, "代號": sid, "公司": name,
+                                "外資買賣超(億)": net_amt_yi,
+                                "日期": latest_row[date_col].strftime("%Y-%m-%d")
+                            })
+                            fetch_log.append(f"✅ {name}({sid}) {latest_row[date_col].date()} 外資 {net_amt_yi:+.2f}億")
+                        else:
+                            fetch_log.append(f"⚠️ {name}({sid}) 無外資列(name值:{df_s[name_col].unique().tolist()})")
+                    else:
+                        fetch_log.append(f"❌ {name}({sid}) 欄位不符(有:{list(df_s.columns)})")
+                else:
+                    fetch_log.append(f"❌ {name}({sid}) API msg={d.get('msg')}")
+            except Exception as e:
+                fetch_log.append(f"❌ {name}({sid}) 例外:{e}")
+
+    st.session_state["_chip_fetch_log"] = fetch_log
+
+    if not group_results:
+        return get_backup_chips_data()[0], get_backup_chips_data()[1], get_backup_chips_data()[2], fetch_log
+
+    df_detail = pd.DataFrame(group_results)
+    df_grouped = df_detail.groupby("族群")["外資買賣超(億)"].sum().reset_index()
+    df_grouped.columns = ["族群", "大戶差 (億)"]
+
+    df_buy_top5  = df_grouped.sort_values("大戶差 (億)", ascending=False).head(5).copy().reset_index(drop=True)
+    df_sell_top5 = df_grouped.sort_values("大戶差 (億)", ascending=True).head(5).copy().reset_index(drop=True)
+
+    df_buy_top5.insert(0, "排名", range(1, len(df_buy_top5) + 1))
+    df_sell_top5.insert(0, "排名", range(1, len(df_sell_top5) + 1))
+
+    df_buy_top5_show = df_buy_top5.copy()
+    df_sell_top5_show = df_sell_top5.copy()
+    df_buy_top5_show["大戶差 (億)"]  = df_buy_top5_show["大戶差 (億)"].apply(lambda x: f"+{x:.2f} 億")
+    df_sell_top5_show["大戶差 (億)"] = df_sell_top5_show["大戶差 (億)"].apply(lambda x: f"{x:.2f} 億")
+
+    n_success = len([l for l in fetch_log if l.startswith("✅")])
+    n_total   = len(fetch_log)
+
+    return df_buy_top5_show, df_sell_top5_show, f"{date_str}（實際抓取 {n_success}/{n_total} 檔成功）", fetch_log
+
+result = fetch_tw_chip_data_automated()
+if len(result) == 4:
+    df_automated_buy, df_automated_sell, chip_date_info, chip_fetch_log = result
+else:
+    df_automated_buy, df_automated_sell, chip_date_info = result
+    chip_fetch_log = []
+
+st.markdown(f"### 🎯 每日盤後大戶資金流向統計 (依電子股族群加總外資買賣超 | 籌碼基準日: {chip_date_info})")
+col_buy, col_sell = st.columns(2)
+with col_buy:
+    st.success("🛒 盤後大戶買超 TOP 5 (資金流入主攻部隊)")
+    st.dataframe(df_automated_buy, use_container_width=True, hide_index=True)
+with col_sell:
+    st.error("📉 盤後大戶賣超 TOP 5 (資金流出/防範調節)")
+    st.dataframe(df_automated_sell, use_container_width=True, hide_index=True)
+
+with st.expander("🔍 展開查看本次每檔個股實際抓取明細（診斷用，確認資料是否真實）", expanded=False):
+    if chip_fetch_log:
+        st.code("\n".join(chip_fetch_log), language=None)
+    else:
+        st.warning("無抓取記錄（可能直接使用備援資料）。")
+
+st.markdown("---")
 
 # ==============================================================================
 # 六、大數據動態運算引擎
@@ -1898,7 +1950,7 @@ with st.expander("⚙️ 六項指標說明", expanded=False):
 # ==============================================================================
 # 介面：每批 100 檔分頁掃描控制
 # ==============================================================================
-BATCH_SIZE = 300
+BATCH_SIZE = 100
 all_stock_items = list(ELECTRONIC_STOCK_DB.items())
 n_batches = (len(all_stock_items) + BATCH_SIZE - 1) // BATCH_SIZE
 
@@ -2081,8 +2133,529 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+st.markdown("---")
+
 # ==============================================================================
-# 十二、網頁定時自動循環刷新機制
+# 十二、選股中心：三大模組複合策略篩選引擎
+# ==============================================================================
+st.markdown("### 🎯 選股中心｜三大模組複合策略（成長動力 × 籌碼集中 × 技術趨勢）")
+st.caption(
+    "本策略同時檢驗三大模組共 8 項條件，逐項列出實際數值，不做模糊化處理。"
+    "｜模組一(成長)：營收YoY>20%、近3月平均YoY>0、營業費用YoY>5%、合約負債季增率>0"
+    "｜模組二(籌碼)：千張大戶持股比例>50%且增加、主力連續5日淨買超"
+    "｜模組三(技術)：收盤>MA20>MA60、成交量>5日均量×1.5"
+)
+
+with st.expander("⚙️ 策略邏輯詳細說明（展開查看 8 項條件定義）", expanded=False):
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        st.markdown("**🚀 模組一：成長動力**")
+        st.info(
+            "1️⃣ 月營收年增率 > 20%\n\n"
+            "2️⃣ 近3個月營收平均年增率 > 0\n\n"
+            "3️⃣ 營業費用年增率 > 5%\n\n"
+            "4️⃣ 合約負債季增率 > 0"
+        )
+    with sc2:
+        st.markdown("**🐋 模組二：籌碼集中**")
+        st.info(
+            "5️⃣ 千張大戶持股比例 > 50% 且較前期增加\n\n"
+            "6️⃣ 主力（外資）連續 5 日淨買超"
+        )
+    with sc3:
+        st.markdown("**📈 模組三：技術趨勢**")
+        st.info(
+            "7️⃣ 收盤價 > MA20 > MA60（多頭排列）\n\n"
+            "8️⃣ 成交量 > 5日均量 × 1.5（爆量）"
+        )
+
+# ==============================================================================
+# 各模組指標抓取函數（回傳：是否通過, 說明文字, 原始數值dict）
+# ==============================================================================
+
+# ── 模組一-1：月營收年增率 > 20% ─────────────────────────────────────────────
+def sc_revenue_yoy_above20(sid, start, end):
+    df = _fm_fetch("TaiwanStockMonthRevenue", sid, start, end)
+    if df.empty:
+        return False, "無資料", {}
+    date_col = "date" if "date" in df.columns else df.columns[0]
+    rev_col  = next((c for c in df.columns if c.lower() == "revenue"), None)
+    if not rev_col:
+        rev_col = next((c for c in df.columns if "revenue" in c.lower()), None)
+    if not rev_col:
+        return False, f"找不到revenue欄(有:{list(df.columns)})", {}
+    df[rev_col]  = pd.to_numeric(df[rev_col], errors="coerce").fillna(0)
+    df[date_col] = pd.to_datetime(df[date_col])
+    df = df.sort_values(date_col).drop_duplicates(date_col).reset_index(drop=True).set_index(date_col)
+    if len(df) < 13:
+        return False, f"資料不足(需≥13月,僅{len(df)}月)", {}
+    latest_date = df.index[-1]
+    latest_rev  = float(df[rev_col].iloc[-1])
+    target_ym = (latest_date.year - 1, latest_date.month)
+    same_month = df[(df.index.year == target_ym[0]) & (df.index.month == target_ym[1])]
+    if same_month.empty:
+        return False, "找不到去年同月資料", {}
+    last_year_rev = float(same_month[rev_col].iloc[-1])
+    if last_year_rev == 0:
+        return False, "去年同月營收為零", {}
+    yoy = (latest_rev - last_year_rev) / abs(last_year_rev) * 100
+    passed = yoy > 20
+    raw = {"最新月份": latest_date.strftime("%y/%m"), "最新月營收(千元)": round(latest_rev/1000, 0),
+           "去年同月營收(千元)": round(last_year_rev/1000, 0), "YoY%": round(yoy, 2)}
+    return passed, f"YoY {yoy:+.2f}%（門檻20%）", raw
+
+# ── 模組一-2：近3個月營收平均年增率 > 0 ──────────────────────────────────────
+def sc_revenue_3m_avg_yoy_positive(sid, start, end):
+    df = _fm_fetch("TaiwanStockMonthRevenue", sid, start, end)
+    if df.empty:
+        return False, "無資料", {}
+    date_col = "date" if "date" in df.columns else df.columns[0]
+    rev_col  = next((c for c in df.columns if c.lower() == "revenue"), None)
+    if not rev_col:
+        rev_col = next((c for c in df.columns if "revenue" in c.lower()), None)
+    if not rev_col:
+        return False, f"找不到revenue欄(有:{list(df.columns)})", {}
+    df[rev_col]  = pd.to_numeric(df[rev_col], errors="coerce").fillna(0)
+    df[date_col] = pd.to_datetime(df[date_col])
+    df = df.sort_values(date_col).drop_duplicates(date_col).reset_index(drop=True).set_index(date_col)
+    if len(df) < 15:
+        return False, f"資料不足(需≥15月,僅{len(df)}月)", {}
+
+    yoy_list = []
+    detail = {}
+    for k in range(3):  # 最新3個月：k=0(最新), 1, 2
+        idx = -1 - k
+        this_date = df.index[idx]
+        this_rev  = float(df[rev_col].iloc[idx])
+        target_ym = (this_date.year - 1, this_date.month)
+        same_month = df[(df.index.year == target_ym[0]) & (df.index.month == target_ym[1])]
+        if same_month.empty:
+            continue
+        last_year_rev = float(same_month[rev_col].iloc[-1])
+        if last_year_rev == 0:
+            continue
+        yoy_k = (this_rev - last_year_rev) / abs(last_year_rev) * 100
+        yoy_list.append(yoy_k)
+        detail[f"{this_date.strftime('%y/%m')}_YoY%"] = round(yoy_k, 2)
+
+    if len(yoy_list) < 3:
+        return False, f"近3月YoY可計算數不足({len(yoy_list)}/3)", detail
+    avg_yoy = sum(yoy_list) / len(yoy_list)
+    passed = avg_yoy > 0
+    detail["近3月平均YoY%"] = round(avg_yoy, 2)
+    return passed, f"近3月平均YoY {avg_yoy:+.2f}%", detail
+
+# ── 模組一-3：營業費用年增率 > 5% ────────────────────────────────────────────
+def sc_opex_yoy_above5(sid, start, end):
+    df = _fm_fetch("TaiwanStockFinancialStatements", sid, start, end)
+    if df.empty:
+        return False, "無資料", {}
+    type_col  = next((c for c in df.columns if "type" in c.lower()), None)
+    value_col = next((c for c in df.columns if "value" in c.lower() or "amount" in c.lower()), None)
+    date_col  = "date" if "date" in df.columns else df.columns[0]
+    if not type_col or not value_col:
+        return False, f"找不到欄位(有:{list(df.columns)})", {}
+    opex_mask = df[type_col].astype(str).str.contains(
+        "OperatingExpenses|operating_expense|營業費用", case=False, na=False)
+    df_opex = df[opex_mask].copy()
+    if df_opex.empty:
+        return False, "無營業費用欄位", {}
+    df_opex[value_col] = pd.to_numeric(df_opex[value_col], errors="coerce").fillna(0)
+    df_opex[date_col]  = pd.to_datetime(df_opex[date_col])
+    grouped = df_opex.groupby(date_col)[value_col].sum().sort_index()
+    if len(grouped) < 5:
+        return False, f"季數不足(需≥5季,僅{len(grouped)}季)", {}
+    latest_val  = float(grouped.iloc[-1])
+    same_q_val  = float(grouped.iloc[-5])
+    if same_q_val == 0:
+        return False, "去年同季為零", {}
+    yoy = (latest_val - same_q_val) / abs(same_q_val) * 100
+    passed = yoy > 5
+    raw = {"去年同季日期": str(grouped.index[-5].date()), "去年同季營業費用(千元)": round(same_q_val/1000, 0),
+           "最新季日期": str(grouped.index[-1].date()), "最新季營業費用(千元)": round(latest_val/1000, 0),
+           "YoY%": round(yoy, 2)}
+    return passed, f"營業費用YoY {yoy:+.2f}%（門檻5%）", raw
+
+# ── 模組一-4：合約負債季增率 > 0 ─────────────────────────────────────────────
+def sc_contract_liability_qoq_positive(sid, start, end):
+    df = _fm_fetch("TaiwanStockBalanceSheet", sid, start, end)
+    if df.empty:
+        return False, "無資料", {}
+    type_col  = next((c for c in df.columns if "type" in c.lower()), None)
+    value_col = next((c for c in df.columns if "value" in c.lower() or "amount" in c.lower()), None)
+    date_col  = "date" if "date" in df.columns else df.columns[0]
+    if not type_col or not value_col:
+        return False, f"找不到欄位(有:{list(df.columns)})", {}
+    cl_mask = df[type_col].astype(str).str.contains(
+        "ContractLiabilit|contract_liabilit|合約負債|預收|DeferredRevenue|AdvanceReceipt", case=False, na=False)
+    df_cl = df[cl_mask].copy()
+    if df_cl.empty:
+        return False, "無合約負債欄位", {}
+    df_cl[value_col] = pd.to_numeric(df_cl[value_col], errors="coerce").fillna(0)
+    df_cl[date_col]  = pd.to_datetime(df_cl[date_col])
+    grouped = df_cl.groupby(date_col)[value_col].sum().sort_index()
+    if len(grouped) < 2:
+        return False, "期數不足(需≥2季)", {}
+    latest_val = float(grouped.iloc[-1])
+    prev_val   = float(grouped.iloc[-2])
+    if prev_val == 0:
+        qoq = 0.0
+    else:
+        qoq = (latest_val - prev_val) / abs(prev_val) * 100
+    passed = (latest_val - prev_val) > 0
+    raw = {"前季日期": str(grouped.index[-2].date()), "前季合約負債(千元)": round(prev_val/1000, 0),
+           "最新季日期": str(grouped.index[-1].date()), "最新季合約負債(千元)": round(latest_val/1000, 0),
+           "季增率%": round(qoq, 2)}
+    return passed, f"合約負債季增率 {qoq:+.2f}%", raw
+
+# ── 模組二-5：千張大戶持股比例 > 50% 且增加 ──────────────────────────────────
+def sc_big_holder_above50_increasing(sid, start, end):
+    df = _fm_fetch("TaiwanStockHoldingSharesPer", sid, start, end)
+    if df.empty:
+        return False, "無資料", {}
+    level_col = next((c for c in df.columns if "level" in c.lower() or "持股" in c), None)
+    pct_col   = next((c for c in df.columns if "percent" in c.lower() or "ratio" in c.lower() or "占比" in c), None)
+    date_col  = "date" if "date" in df.columns else df.columns[0]
+    if not level_col or not pct_col:
+        return False, f"找不到欄位(有:{list(df.columns)})", {}
+    try:
+        df["_lvl_num"] = df[level_col].astype(str).str.extract(r"^(\d+)")[0].astype(float)
+        # 千張大戶：level >= 1000
+        df_big = df[df["_lvl_num"] >= 1000].copy()
+    except Exception:
+        df_big = df[df[level_col].astype(str).str.contains("1000", na=False)].copy()
+    if df_big.empty:
+        return False, "無千張以上級距資料", {}
+    df_big[pct_col]  = pd.to_numeric(df_big[pct_col], errors="coerce").fillna(0)
+    df_big[date_col] = pd.to_datetime(df_big[date_col])
+    daily = df_big.groupby(date_col)[pct_col].sum().sort_index()
+    if len(daily) < 2:
+        return False, "期數不足", {}
+    latest, prev = float(daily.iloc[-1]), float(daily.iloc[-2])
+    passed = (latest > 50) and (latest > prev)
+    raw = {"前期日期": str(daily.index[-2].date()), "前期千張大戶持股%": round(prev, 2),
+           "最新日期": str(daily.index[-1].date()), "最新千張大戶持股%": round(latest, 2),
+           "變化%": round(latest - prev, 2)}
+    return passed, f"千張大戶 {prev:.2f}%→{latest:.2f}%（門檻>50%且增加）", raw
+
+# ── 模組二-6：主力（外資）連續5日淨買超 ──────────────────────────────────────
+def sc_foreign_5day_consecutive_buy(sid, start, end):
+    df = _fm_fetch("TaiwanStockInstitutionalInvestorsBuySell", sid, start, end)
+    if df.empty:
+        return False, "無資料", {}
+    name_col = next((c for c in df.columns if c.lower() == "name"), None)
+    buy_col  = next((c for c in df.columns if c.lower() == "buy"), None)
+    sell_col = next((c for c in df.columns if c.lower() == "sell"), None)
+    date_col = "date" if "date" in df.columns else df.columns[0]
+    if not name_col or not buy_col or not sell_col:
+        return False, f"找不到欄位(有:{list(df.columns)})", {}
+    df_f = df[df[name_col].astype(str).str.contains("Foreign_Investor|外資", case=False, na=False)].copy()
+    if df_f.empty:
+        return False, "無外資列資料", {}
+    df_f[buy_col]  = pd.to_numeric(df_f[buy_col], errors="coerce").fillna(0)
+    df_f[sell_col] = pd.to_numeric(df_f[sell_col], errors="coerce").fillna(0)
+    df_f[date_col] = pd.to_datetime(df_f[date_col])
+    df_f = df_f.sort_values(date_col).drop_duplicates(date_col)
+    df_f["net"] = df_f[buy_col] - df_f[sell_col]
+    if len(df_f) < 5:
+        return False, f"資料不足(需≥5日,僅{len(df_f)}日)", {}
+    last5 = df_f.tail(5)
+    passed = bool((last5["net"] > 0).all())
+    raw = {f"D-{4-i}({row[date_col].strftime('%m/%d')})": int(row["net"])
+           for i, (_, row) in enumerate(last5.iterrows())}
+    net_str = ", ".join([f"{int(v):+,}" for v in last5["net"]])
+    return passed, f"近5日外資淨買超(股): {net_str}", raw
+
+# ── 模組三-7：收盤價 > MA20 > MA60 ───────────────────────────────────────────
+def sc_ma_bullish_alignment(sid):
+    try:
+        hist = yf.Ticker(f"{sid}.TW").history(period="100d")
+        if hist.empty or len(hist) < 60:
+            return False, f"K線資料不足({len(hist)}天)", {}
+        close = hist["Close"]
+        ma20 = close.rolling(20).mean()
+        ma60 = close.rolling(60).mean()
+        curr_close = float(close.iloc[-1])
+        curr_ma20  = float(ma20.iloc[-1])
+        curr_ma60  = float(ma60.iloc[-1])
+        passed = (curr_close > curr_ma20) and (curr_ma20 > curr_ma60)
+        raw = {"收盤價": round(curr_close, 2), "MA20": round(curr_ma20, 2), "MA60": round(curr_ma60, 2)}
+        return passed, f"收盤{curr_close:.2f} / MA20={curr_ma20:.2f} / MA60={curr_ma60:.2f}", raw
+    except Exception as e:
+        return False, f"抓取失敗:{e}", {}
+
+# ── 模組三-8：成交量 > 5日均量 × 1.5 ─────────────────────────────────────────
+def sc_volume_breakout(sid):
+    try:
+        hist = yf.Ticker(f"{sid}.TW").history(period="20d")
+        if hist.empty or len(hist) < 6:
+            return False, f"成交量資料不足({len(hist)}天)", {}
+        vol = hist["Volume"]
+        curr_vol = float(vol.iloc[-1])
+        ma5_vol_prior = float(vol.iloc[-6:-1].mean())  # 不含當日的前5日均量
+        if ma5_vol_prior == 0:
+            return False, "前5日均量為零", {}
+        ratio = curr_vol / ma5_vol_prior
+        passed = ratio > 1.5
+        raw = {"當日成交量": int(curr_vol), "前5日均量": int(ma5_vol_prior), "倍數": round(ratio, 2)}
+        return passed, f"當日量{int(curr_vol):,} / 前5日均量{int(ma5_vol_prior):,} = {ratio:.2f}倍（門檻1.5倍）", raw
+    except Exception as e:
+        return False, f"抓取失敗:{e}", {}
+
+# ==============================================================================
+# 單檔股票完整 8 條件掃描
+# ==============================================================================
+def sc_screen_one_stock(sid, name):
+    end_date   = datetime.now().strftime("%Y-%m-%d")
+    start_long = (datetime.now() - timedelta(days=750)).strftime("%Y-%m-%d")
+    start_rev  = (datetime.now() - timedelta(days=480)).strftime("%Y-%m-%d")
+    start_chip = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
+
+    row = {"代號": sid, "公司": name}
+    raw_all = {}
+
+    ok1, n1, r1 = sc_revenue_yoy_above20(sid, start_rev, end_date)
+    row["營收YoY>20%"], row["營收YoY>20%_說明"] = ok1, n1
+    raw_all["營收YoY20"] = r1
+
+    ok2, n2, r2 = sc_revenue_3m_avg_yoy_positive(sid, start_rev, end_date)
+    row["近3月均YoY>0"], row["近3月均YoY>0_說明"] = ok2, n2
+    raw_all["近3月均YoY"] = r2
+
+    ok3, n3, r3 = sc_opex_yoy_above5(sid, start_long, end_date)
+    row["營業費用YoY>5%"], row["營業費用YoY>5%_說明"] = ok3, n3
+    raw_all["營業費用YoY"] = r3
+
+    ok4, n4, r4 = sc_contract_liability_qoq_positive(sid, start_long, end_date)
+    row["合約負債季增>0"], row["合約負債季增>0_說明"] = ok4, n4
+    raw_all["合約負債QoQ"] = r4
+
+    ok5, n5, r5 = sc_big_holder_above50_increasing(sid, start_long, end_date)
+    row["千張大戶>50%增"], row["千張大戶>50%增_說明"] = ok5, n5
+    raw_all["千張大戶"] = r5
+
+    ok6, n6, r6 = sc_foreign_5day_consecutive_buy(sid, start_chip, end_date)
+    row["外資連5日買超"], row["外資連5日買超_說明"] = ok6, n6
+    raw_all["外資連買"] = r6
+
+    ok7, n7, r7 = sc_ma_bullish_alignment(sid)
+    row["收盤>MA20>MA60"], row["收盤>MA20>MA60_說明"] = ok7, n7
+    raw_all["均線排列"] = r7
+
+    ok8, n8, r8 = sc_volume_breakout(sid)
+    row["爆量>1.5倍"], row["爆量>1.5倍_說明"] = ok8, n8
+    raw_all["爆量"] = r8
+
+    row["符合項數"] = sum([ok1, ok2, ok3, ok4, ok5, ok6, ok7, ok8])
+    row["_raw"] = raw_all
+    return row
+
+def sc_run_screen_with_progress(stock_db):
+    results   = []
+    stocks    = list(stock_db.items())
+    total     = len(stocks)
+    prog_bar  = st.progress(0, text="準備開始掃描...")
+    log_box   = st.empty()
+    log_lines = []
+    nl = chr(10)
+
+    for i, (sid, name) in enumerate(stocks):
+        prog_bar.progress((i + 1) / total, text=f"掃描中 {i+1}/{total}：{name}({sid})")
+        row = sc_screen_one_stock(sid, name)
+        icons = "".join([
+            ("📈" if row["營收YoY>20%"] else "⚫"),
+            ("📊" if row["近3月均YoY>0"] else "⚫"),
+            ("🔬" if row["營業費用YoY>5%"] else "⚫"),
+            ("📋" if row["合約負債季增>0"] else "⚫"),
+            ("🐋" if row["千張大戶>50%增"] else "⚫"),
+            ("💰" if row["外資連5日買超"] else "⚫"),
+            ("🟢" if row["收盤>MA20>MA60"] else "⚫"),
+            ("🔥" if row["爆量>1.5倍"] else "⚫"),
+        ])
+        line = f"{icons} {name}({sid}) → {row['符合項數']}/8 項"
+        log_lines.append(line)
+        if len(log_lines) > 14:
+            log_lines = log_lines[-14:]
+        log_box.code(nl.join(log_lines), language=None)
+        results.append(row)
+
+    prog_bar.progress(1.0, text=f"✅ 掃描完成！共 {total} 檔")
+    log_box.empty()
+    return pd.DataFrame(results)
+
+# ==============================================================================
+# 介面：批次選擇 + 執行
+# ==============================================================================
+SC_BATCH_SIZE = 100
+sc_all_items = list(ELECTRONIC_STOCK_DB.items())
+sc_n_batches = (len(sc_all_items) + SC_BATCH_SIZE - 1) // SC_BATCH_SIZE
+
+st.markdown("#### 📦 選股中心｜分批掃描設定（每批 100 檔）")
+sc_batch_options = []
+for b in range(sc_n_batches):
+    s_i = b * SC_BATCH_SIZE
+    e_i = min(s_i + SC_BATCH_SIZE, len(sc_all_items))
+    sc_batch_options.append(f"第 {b+1} 批（{s_i+1}-{e_i}檔，代號 {sc_all_items[s_i][0]}~{sc_all_items[e_i-1][0]}）")
+
+sc_col_batch, sc_col_run, sc_col_clear, sc_col_min = st.columns([2.2, 1, 1, 1])
+with sc_col_batch:
+    sc_selected_label = st.selectbox("選擇要掃描的批次", sc_batch_options, key="sc_batch_select")
+sc_selected_idx = sc_batch_options.index(sc_selected_label)
+
+with sc_col_run:
+    sc_do_run = st.button("🚀 執行本批選股", type="primary", use_container_width=True, key="sc_run_btn")
+with sc_col_clear:
+    sc_do_clear = st.button("🔄 清除本批結果", use_container_width=True, key="sc_clear_btn")
+with sc_col_min:
+    sc_min_cond = st.number_input("最低符合項數", min_value=1, max_value=8, value=5, step=1, key="sc_min_cond")
+
+sc_session_key = f"sc_screen_df_batch_{sc_selected_idx}"
+
+if sc_do_clear:
+    if sc_session_key in st.session_state:
+        del st.session_state[sc_session_key]
+    st.rerun()
+
+if sc_do_run:
+    s_i = sc_selected_idx * SC_BATCH_SIZE
+    e_i = min(s_i + SC_BATCH_SIZE, len(sc_all_items))
+    sc_batch_db = dict(sc_all_items[s_i:e_i])
+    df_sc_result = sc_run_screen_with_progress(sc_batch_db)
+    st.session_state[sc_session_key] = df_sc_result
+
+df_sc_all = st.session_state.get(sc_session_key, pd.DataFrame())
+
+if df_sc_all.empty:
+    st.warning(f"⚠️ 尚未掃描「{sc_selected_label}」。點擊「🚀 執行本批選股」開始（每批約需 2-5 分鐘，因含技術指標+籌碼+財報多重 API 呼叫）。")
+else:
+    df_sc_pass = df_sc_all[df_sc_all["符合項數"] >= sc_min_cond].sort_values(
+        "符合項數", ascending=False).reset_index(drop=True)
+
+    sc_total = len(df_sc_all)
+    sc_pass  = len(df_sc_pass)
+    sc_cnt8  = len(df_sc_all[df_sc_all["符合項數"] == 8])
+    sc_cnt7  = len(df_sc_all[df_sc_all["符合項數"] == 7])
+    sc_cnt6  = len(df_sc_all[df_sc_all["符合項數"] == 6])
+    sc_cnt5  = len(df_sc_all[df_sc_all["符合項數"] == 5])
+
+    n1c, n2c, n3c, n4c, n5c, n6c = st.columns(6)
+    with n1c: st.metric("📦 本批掃描", f"{sc_total} 檔")
+    with n2c: st.metric(f"✅ 符合≥{sc_min_cond}", f"{sc_pass} 檔")
+    with n3c: st.metric("5項", f"{sc_cnt5}")
+    with n4c: st.metric("6項", f"{sc_cnt6}")
+    with n5c: st.metric("7項", f"{sc_cnt7}")
+    with n6c: st.metric("👑8項全中", f"{sc_cnt8}")
+
+    st.markdown("---")
+
+    # ── 完整原始數值明細表（所有股票，全部數值）──
+    st.markdown("#### 📋 完整原始數值明細（本批所有股票，8 項條件全部數值）")
+    sc_detail_rows = []
+    for _, r in df_sc_all.iterrows():
+        raw = r["_raw"]
+        d1 = raw.get("營收YoY20", {}) or {}
+        d2 = raw.get("近3月均YoY", {}) or {}
+        d3 = raw.get("營業費用YoY", {}) or {}
+        d4 = raw.get("合約負債QoQ", {}) or {}
+        d5 = raw.get("千張大戶", {}) or {}
+        d6 = raw.get("外資連買", {}) or {}
+        d7 = raw.get("均線排列", {}) or {}
+        d8 = raw.get("爆量", {}) or {}
+
+        sc_detail_rows.append({
+            "代號": r["代號"], "公司": r["公司"], "符合項數": f"{int(r['符合項數'])}/8",
+            "📈YoY最新%": d1.get("YoY%"), "📈最新月營收(千元)": d1.get("最新月營收(千元)"),
+            "📈去年同月營收(千元)": d1.get("去年同月營收(千元)"), "📈通過": "✅" if r["營收YoY>20%"] else "❌",
+            "📊近3月均YoY%": d2.get("近3月平均YoY%"), "📊通過": "✅" if r["近3月均YoY>0"] else "❌",
+            "🔬營業費用YoY%": d3.get("YoY%"), "🔬最新季營業費用(千元)": d3.get("最新季營業費用(千元)"),
+            "🔬去年同季營業費用(千元)": d3.get("去年同季營業費用(千元)"), "🔬通過": "✅" if r["營業費用YoY>5%"] else "❌",
+            "📋合約負債季增%": d4.get("季增率%"), "📋最新季合約負債(千元)": d4.get("最新季合約負債(千元)"),
+            "📋前季合約負債(千元)": d4.get("前季合約負債(千元)"), "📋通過": "✅" if r["合約負債季增>0"] else "❌",
+            "🐋千張大戶最新%": d5.get("最新千張大戶持股%"), "🐋千張大戶前期%": d5.get("前期千張大戶持股%"),
+            "🐋變化%": d5.get("變化%"), "🐋通過": "✅" if r["千張大戶>50%增"] else "❌",
+            "💰外資連買說明": r["外資連5日買超_說明"], "💰通過": "✅" if r["外資連5日買超"] else "❌",
+            "🟢收盤價": d7.get("收盤價"), "🟢MA20": d7.get("MA20"), "🟢MA60": d7.get("MA60"),
+            "🟢通過": "✅" if r["收盤>MA20>MA60"] else "❌",
+            "🔥當日成交量": d8.get("當日成交量"), "🔥前5日均量": d8.get("前5日均量"), "🔥倍數": d8.get("倍數"),
+            "🔥通過": "✅" if r["爆量>1.5倍"] else "❌",
+        })
+    df_sc_detail_full = pd.DataFrame(sc_detail_rows)
+    st.dataframe(df_sc_detail_full, use_container_width=True, hide_index=True, height=450)
+
+    sc_csv_full = df_sc_detail_full.to_csv(index=False, encoding="utf-8-sig")
+    st.download_button("📥 下載本批完整數值 CSV", sc_csv_full,
+                       f"strategy_full_values_batch{sc_selected_idx+1}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                       "text/csv", key="sc_dl_full")
+
+    st.markdown("---")
+
+    # ── 符合名單 ──
+    if df_sc_pass.empty:
+        st.warning(f"⚠️ 本批中無股票符合 ≥{sc_min_cond} 項條件，可調低門檻或切換批次。")
+    else:
+        st.markdown(f"#### 🏆 本批符合 ≥{sc_min_cond} 項複合策略 — 共 **{sc_pass}** 檔")
+
+        sc_pass_rows = []
+        for _, r in df_sc_pass.iterrows():
+            sc_pass_rows.append({
+                "代號": r["代號"], "公司": r["公司"],
+                "符合項數": f"{'⭐'*int(r['符合項數'])} {int(r['符合項數'])}/8",
+                "📈營收YoY>20%": ("✅ " if r["營收YoY>20%"] else "❌ ") + str(r["營收YoY>20%_說明"]),
+                "📊近3月均YoY>0": ("✅ " if r["近3月均YoY>0"] else "❌ ") + str(r["近3月均YoY>0_說明"]),
+                "🔬營業費用YoY>5%": ("✅ " if r["營業費用YoY>5%"] else "❌ ") + str(r["營業費用YoY>5%_說明"]),
+                "📋合約負債季增>0": ("✅ " if r["合約負債季增>0"] else "❌ ") + str(r["合約負債季增>0_說明"]),
+                "🐋千張大戶>50%增": ("✅ " if r["千張大戶>50%增"] else "❌ ") + str(r["千張大戶>50%增_說明"]),
+                "💰外資連5日買超": ("✅ " if r["外資連5日買超"] else "❌ ") + str(r["外資連5日買超_說明"]),
+                "🟢收盤>MA20>MA60": ("✅ " if r["收盤>MA20>MA60"] else "❌ ") + str(r["收盤>MA20>MA60_說明"]),
+                "🔥爆量>1.5倍": ("✅ " if r["爆量>1.5倍"] else "❌ ") + str(r["爆量>1.5倍_說明"]),
+            })
+        df_sc_pass_show = pd.DataFrame(sc_pass_rows)
+        st.dataframe(df_sc_pass_show, use_container_width=True, hide_index=True)
+
+        sc_fig = go.Figure(go.Bar(
+            y=df_sc_pass["公司"]+"("+df_sc_pass["代號"]+")",
+            x=df_sc_pass["符合項數"].astype(int),
+            orientation="h",
+            marker_color=["#ff4b4b" if x>=7 else ("#ff8c42" if x==6 else "#f5a623")
+                          for x in df_sc_pass["符合項數"].astype(int)],
+            text=df_sc_pass["符合項數"].astype(int).apply(lambda x: f"{x}/8"),
+            textposition="auto"
+        ))
+        sc_fig.update_layout(height=max(280, len(df_sc_pass)*26+60),
+                              xaxis=dict(range=[0,8.5], tickvals=list(range(1,9))),
+                              margin=dict(l=10,r=10,t=30,b=10), title="本批符合策略股票排行")
+        st.plotly_chart(sc_fig, use_container_width=True, key=f"sc_pass_bar_{sc_selected_idx}")
+
+        sc_csv_pass = df_sc_pass_show.to_csv(index=False, encoding="utf-8-sig")
+        st.download_button("📥 下載符合名單 CSV", sc_csv_pass,
+                           f"strategy_pass_batch{sc_selected_idx+1}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                           "text/csv", key="sc_dl_pass")
+
+        st.markdown("#### 📊 本批各條件通過率")
+        sc_cond_cols  = ["營收YoY>20%","近3月均YoY>0","營業費用YoY>5%","合約負債季增>0",
+                          "千張大戶>50%增","外資連5日買超","收盤>MA20>MA60","爆量>1.5倍"]
+        sc_cond_names = ["📈營收YoY20%","📊近3月均YoY","🔬營業費用YoY5%","📋合約負債季增",
+                          "🐋千張大戶50%","💰外資連買5日","🟢均線多排","🔥爆量1.5倍"]
+        sc_cond_vals  = [int(df_sc_all[c].sum()) for c in sc_cond_cols]
+        sc_cond_pcts  = [v/sc_total*100 for v in sc_cond_vals]
+        sc_fig_ov = go.Figure(go.Bar(
+            x=sc_cond_names, y=sc_cond_pcts,
+            marker_color=["#ff4b4b","#ff8c42","#4b9eff","#f5a623","#9b5de5","#f15bb5","#00c49f","#06d6a0"],
+            text=[f"{v}檔({p:.1f}%)" for v,p in zip(sc_cond_vals, sc_cond_pcts)],
+            textposition="auto"
+        ))
+        sc_fig_ov.update_layout(height=300, yaxis=dict(range=[0,100], title="通過率 (%)"),
+                                 margin=dict(l=10,r=10,t=10,b=10))
+        st.plotly_chart(sc_fig_ov, use_container_width=True, key=f"sc_ov_bar_{sc_selected_idx}")
+
+st.markdown(
+    "<small>⚠️ 千張大戶與合約負債資料依 FinMind 財報/籌碼公告頻率更新，可能有數日至數週延遲；"
+    "技術指標(MA/成交量)為最新交易日資料。本策略僅供量化篩選參考，不構成投資建議。</small>",
+    unsafe_allow_html=True
+)
+
+# ==============================================================================
+# 十三、網頁定時自動循環刷新機制
 # ==============================================================================
 if auto_refresh:
     time.sleep(refresh_interval)
