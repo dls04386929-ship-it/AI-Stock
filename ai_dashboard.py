@@ -1948,13 +1948,13 @@ with st.expander("⚙️ 六項指標說明", expanded=False):
         st.info("**💸 營業費用YoY>5%**\n最新一季營業費用年增率 > 5%。")
 
 # ==============================================================================
-# 介面：每批 100 檔分頁掃描控制
+# 介面：每批 300 檔分頁掃描控制
 # ==============================================================================
-BATCH_SIZE = 100
+BATCH_SIZE = 300
 all_stock_items = list(ELECTRONIC_STOCK_DB.items())
 n_batches = (len(all_stock_items) + BATCH_SIZE - 1) // BATCH_SIZE
 
-st.markdown("#### 📦 分批掃描設定（每批 100 檔）")
+st.markdown("#### 📦 分批掃描設定（每批 300 檔）")
 st.caption("🎯 預設篩選門檻已設為「符合 ≥4 項指標」— 下方結果區只會列出強力候選股，可在右側調整門檻。")
 batch_options = []
 for b in range(n_batches):
@@ -2486,11 +2486,11 @@ def sc_run_screen_with_progress(stock_db):
 # ==============================================================================
 # 介面：批次選擇 + 執行
 # ==============================================================================
-SC_BATCH_SIZE = 100
+SC_BATCH_SIZE = 300
 sc_all_items = list(ELECTRONIC_STOCK_DB.items())
 sc_n_batches = (len(sc_all_items) + SC_BATCH_SIZE - 1) // SC_BATCH_SIZE
 
-st.markdown("#### 📦 選股中心｜分批掃描設定（每批 100 檔）")
+st.markdown("#### 📦 選股中心｜分批掃描設定（每批 300 檔）")
 sc_batch_options = []
 for b in range(sc_n_batches):
     s_i = b * SC_BATCH_SIZE
