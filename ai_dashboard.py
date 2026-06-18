@@ -141,18 +141,6 @@ TW_STOCK_CONFIG = {
     '5. PCB、電子材料與能源化工': {
         '1303.TW': '南亞', '1714.TW': '和桐', '6274.TW': '台耀', '6153.TW': '嘉聯益',
         '6191.TW': '精成科', '2484.TW': '希華'
-    },
-    '6. 功率元件與第三代半導體': {
-        '3016.TW': '嘉晶', '2481.TW': '強茂', '5425.TW': '台半'
-    },
-    '7. 玻璃基板與先進封裝': {
-        '3037.TW': '欣興', '3044.TW': '健鼎', '8027.TW': '鈦昇'
-    },
-    '8. CPO 矽光子與光通訊': {
-        '4979.TW': '華星光', '2345.TW': '智邦', '3450.TW': '聯鈞'
-    },
-    '9. AI 機器人與自動化': {
-        '2049.TW': '上銀', '2359.TW': '所羅門', '6188.TW': '廣明'      	
     }
 }
 
@@ -187,47 +175,140 @@ GLOBAL_STOCK_CONFIG = {
 }
 
 # ==============================================================================
-# 五、自動串接台灣本土財經 API 函數 (盤後大戶籌碼)
+# 五、自動串接台灣本土財經 API 函數 (盤後大戶籌碼) — 仿凱基期貨版面
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# ⚠️ 上市/上櫃自動判斷：先試 .TW，失敗或空值再試 .TWO
+# （已知群聯8299為上櫃股，混用會導致 yfinance 抓不到資料；
+#  採用自動偵測而非手動清單，對未來擴充族群股票更穩健，不必逐一查證每檔市場別）
+# ------------------------------------------------------------------------------
+def yf_history_with_market_fallback(sid: str, period: str = "2d"):
+    """回傳 (history_df, 實際使用的後綴)。先試上市(.TW)，空值則改試上櫃(.TWO)。"""
+    try:
+        hist = yf.Ticker(f"{sid}.TW").history(period=period)
+        if not hist.empty:
+            return hist, ".TW"
+    except Exception:
+        pass
+    try:
+        hist = yf.Ticker(f"{sid}.TWO").history(period=period)
+        if not hist.empty:
+            return hist, ".TWO"
+    except Exception:
+        pass
+    return pd.DataFrame(), None
+
+# ------------------------------------------------------------------------------
+# 概念股族群池（參考使用者上傳的凱基期貨版面分類，比原本 TW_STOCK_CONFIG 更細）
+# 注意：同一檔股票可能橫跨多個概念股族群（如台積電同時是矽晶圓+IC設計概念）。
+# ------------------------------------------------------------------------------
+CONCEPT_STOCK_GROUPS = {
+    "被動元件(C/R)": {
+        "2327":"國巨","2492":"華新科","2456":"奇力新",
+    },
+    "MLCC": {
+        "2327":"國巨","2492":"華新科","3026":"禾伸堂",
+    },
+    "TWS": {
+        "6679":"鈺太","3227":"原相","2379":"瑞昱",
+    },
+    "面板廠": {
+        "3481":"群創","2409":"友達","6116":"彩晶",
+    },
+    "IC載板": {
+        "3037":"欣興","8046":"南電","3189":"景碩",
+    },
+    "第三代半導體": {
+        "3707":"漢磊","3016":"嘉晶","5425":"台半",
+    },
+    "矽晶圓": {
+        "6488":"環球晶","3532":"台勝科","6182":"合晶",
+    },
+    "EG": {
+        "1303":"南亞","1710":"東聯",
+    },
+    "低軌道衛星": {
+        "3491":"昇達科","6285":"啟碁","2314":"台揚",
+    },
+    "HDI板": {
+        "2313":"華通","3037":"欣興","4958":"臻鼎-KY",
+    },
+    "人形機器人": {
+        "6526":"達發","2359":"所羅門","2382":"廣達",
+    },
+    "元宇宙": {
+        "2498":"宏達電","2388":"威盛","5351":"鈺創",
+    },
+    "量子電腦": {
+        "2357":"華碩","2317":"鴻海",
+    },
+    "車用半導體": {
+        "2303":"聯電","5347":"世界先進","2330":"台積電",
+    },
+    "智慧電網": {
+        "1519":"華城","1503":"士電","1513":"中興電",
+    },
+    "生成式AI": {
+        "2382":"廣達","3231":"緯創","2376":"技嘉","2330":"台積電",
+    },
+    "儲能概念股": {
+        "2308":"台達電","1609":"大亞","1519":"華城",
+    },
+    "記憶體模組": {
+        "3260":"威剛","4967":"十銓","8299":"群聯",
+    },
+    "充電樁概念股": {
+        "2308":"台達電","2457":"飛宏","6282":"康舒",
+    },
+    "自動化生產概念股": {
+        "2049":"上銀","2395":"研華","1597":"直得",
+    },
+}
+
 def get_backup_chips_data():
     backup_buy = [
-        {"排名": 1, "族群": "元宇宙", "大戶差 (億)": 360.9},
-        {"排名": 2, "族群": "5G手機", "大戶差 (億)": 358.9},
-        {"排名": 3, "族群": "MIH平台概念股", "大戶差 (億)": 303.6},
-        {"排名": 4, "族群": "被動元件(C/R)", "大戶差 (億)": 267.0},
-        {"排名": 5, "族群": "MLCC", "大戶差 (億)": 246.3},
+        {"排名": 1, "族群": "被動元件(C/R)", "大戶差 (億)": 122.2, "漲跌幅": 7.75},
+        {"排名": 2, "族群": "MLCC", "大戶差 (億)": 89.53, "漲跌幅": 5.22},
+        {"排名": 3, "族群": "TWS", "大戶差 (億)": 75.33, "漲跌幅": 2.18},
+        {"排名": 4, "族群": "面板廠", "大戶差 (億)": 73.26, "漲跌幅": 9.89},
+        {"排名": 5, "族群": "IC載板", "大戶差 (億)": 69.45, "漲跌幅": 2.93},
+        {"排名": 6, "族群": "第三代半導體", "大戶差 (億)": 66.61, "漲跌幅": 3.05},
+        {"排名": 7, "族群": "矽晶圓", "大戶差 (億)": 62.83, "漲跌幅": 3.11},
+        {"排名": 8, "族群": "EG", "大戶差 (億)": 51.05, "漲跌幅": 5.81},
+        {"排名": 9, "族群": "低軌道衛星", "大戶差 (億)": 48.76, "漲跌幅": 1.07},
+        {"排名": 10, "族群": "HDI板", "大戶差 (億)": 47.79, "漲跌幅": 5.30},
     ]
     backup_sell = [
-        {"排名": 1, "族群": "IC封測", "大戶差 (億)": -83.55},
-        {"排名": 2, "族群": "低軌道衛星", "大戶差 (億)": -42.85},
-        {"排名": 3, "族群": "NAND Flash控制IC", "大戶差 (億)": -28.77},
-        {"排名": 4, "族群": "雲端運算", "大戶差 (億)": -27.94},
-        {"排名": 5, "族群": "探針卡", "大戶差 (億)": -26.86},
+        {"排名": 1, "族群": "人形機器人", "大戶差 (億)": -49.16, "漲跌幅": -0.25},
+        {"排名": 2, "族群": "元宇宙", "大戶差 (億)": -48.55, "漲跌幅": 1.37},
+        {"排名": 3, "族群": "量子電腦", "大戶差 (億)": -48.42, "漲跌幅": -0.22},
+        {"排名": 4, "族群": "車用半導體", "大戶差 (億)": -45.19, "漲跌幅": -0.07},
+        {"排名": 5, "族群": "智慧電網", "大戶差 (億)": -43.09, "漲跌幅": 0.85},
+        {"排名": 6, "族群": "生成式AI", "大戶差 (億)": -42.85, "漲跌幅": 0.48},
+        {"排名": 7, "族群": "儲能概念股", "大戶差 (億)": -40.64, "漲跌幅": 0.57},
+        {"排名": 8, "族群": "記憶體模組", "大戶差 (億)": -40.28, "漲跌幅": -0.42},
+        {"排名": 9, "族群": "充電樁概念股", "大戶差 (億)": -35.49, "漲跌幅": 0.56},
+        {"排名": 10, "族群": "自動化生產概念股", "大戶差 (億)": -33.40, "漲跌幅": 0.63},
     ]
-    return pd.DataFrame(backup_buy), pd.DataFrame(backup_sell), "（無法連線，顯示歷史備援資料）"
+    return pd.DataFrame(backup_buy), pd.DataFrame(backup_sell), "（無法連線，顯示參考範例資料，非即時數據）", []
 
 @st.cache_data(ttl=1800)
 def fetch_tw_chip_data_automated():
     """
-    ✅ 重大修正（取代先前完全錯誤的設計）：
+    ✅ 重大修正（依使用者提供的凱基期貨版面重新設計）：
 
-    之前的版本誤用 dataset='TaiwanStockTotalInstitutionalInvestors'，
-    這個 API 回傳的是「整個大盤」三大法人(外資/投信/自營商)買賣超總和，
-    它的 name 欄位是法人類別名稱（如 Foreign_Investor），
-    根本不是產業族群，所以不可能產生「元宇宙、被動元件」這種族群排行——
-    這是上一輪修正時的設計錯誤，數值因此完全失真或顯示備援假資料。
+    前一版只抓「外資」買賣超，但真實的盤後大戶資金流向報告
+    （如凱基期貨「盤後大戶資金流向」）採用的是「三大法人合計」
+    （外資及陸資 + 投信 + 自營商），不是只看外資單一法人。
 
-    正確做法：FinMind 沒有「依產業族群統計法人買賣超」的現成 API，
-    必須改為「逐股呼叫個股法人買賣超 dataset (TaiwanStockInstitutionalInvestorsBuySell)，
-    再依我們已定義的 TW_STOCK_CONFIG 產業分類，加總外資買賣超金額」，
-    這樣才能得出真實且有意義的「族群資金流向」排行。
-
-    回傳：依族群加總「外資買賣超(億)」排序的買超/賣超 TOP5，
-    並附上實際抓取的個股級原始明細，供右側展開查驗。
+    本版修正為：對每檔成分股呼叫 TaiwanStockInstitutionalInvestorsBuySell，
+    將「外資及陸資」「投信」「自營商」三類買賣超金額加總，
+    再依 CONCEPT_STOCK_GROUPS 概念股族群分類加總，
+    產生 TOP10 買超/賣超排行（含漲跌幅，比照凱基版面）。
     """
     url = "https://api.finmindtrade.com/api/v4/data"
 
-    # 往前找最近一個有效交易日（跳過週末）
     valid_date = None
     for i in range(0, 6):
         d = datetime.now() - timedelta(days=i)
@@ -239,101 +320,194 @@ def fetch_tw_chip_data_automated():
     date_str = valid_date.strftime("%Y-%m-%d")
     start_str = (valid_date - timedelta(days=7)).strftime("%Y-%m-%d")
 
-    group_results = []   # [{族群, 代號, 公司, 外資買賣超(億), 日期}]
-    fetch_log = []       # 偵錯用：記錄每檔股票實際抓取狀況
+    # 法人類別關鍵字：三大法人合計（外資及陸資、投信、自營商皆計入）
+    institutional_pattern = "Foreign_Investor|外資|Investment_Trust|投信|Dealer|自營商"
 
-    for group, stocks in TW_STOCK_CONFIG.items():
-        for sid_full, name in stocks.items():
-            sid = sid_full.split('.')[0]
-            try:
-                r = requests.get(url, params={
-                    "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
-                    "data_id": sid,
-                    "start_date": start_str,
-                    "end_date": date_str,
-                    "token": FINMIND_TOKEN
-                }, timeout=8)
-                d = r.json()
+    group_results = []
+    fetch_log = []
+    stock_price_cache = {}  # 暫存個股漲跌幅，用於計算族群平均漲跌幅
 
-                if d.get("msg") == "success" and d.get("data"):
-                    df_s = pd.DataFrame(d["data"])
-                    # 真實欄位通常為: date, stock_id, name(法人類別), buy, sell
-                    name_col = next((c for c in df_s.columns if c.lower() == "name"), None)
-                    buy_col  = next((c for c in df_s.columns if c.lower() == "buy"), None)
-                    sell_col = next((c for c in df_s.columns if c.lower() == "sell"), None)
-                    date_col = "date" if "date" in df_s.columns else None
+    # 蒐集所有不重複的股票代號，避免同一檔股票被重複呼叫 API
+    all_sids = {}
+    for group, stocks in CONCEPT_STOCK_GROUPS.items():
+        for sid, name in stocks.items():
+            all_sids.setdefault(sid, name)
 
-                    if name_col and buy_col and sell_col and date_col:
-                        df_s[buy_col]  = pd.to_numeric(df_s[buy_col], errors="coerce").fillna(0)
-                        df_s[sell_col] = pd.to_numeric(df_s[sell_col], errors="coerce").fillna(0)
-                        # 篩選外資（含外資及陸資）
-                        df_foreign = df_s[df_s[name_col].astype(str).str.contains(
-                            "Foreign_Investor|外資", case=False, na=False)].copy()
-                        if not df_foreign.empty:
-                            # 取最新一筆日期
-                            df_foreign[date_col] = pd.to_datetime(df_foreign[date_col])
-                            df_foreign = df_foreign.sort_values(date_col)
-                            latest_row = df_foreign.iloc[-1]
-                            net_amt_yi = (latest_row[buy_col] - latest_row[sell_col]) / 1e8
-                            group_results.append({
-                                "族群": group, "代號": sid, "公司": name,
-                                "外資買賣超(億)": net_amt_yi,
-                                "日期": latest_row[date_col].strftime("%Y-%m-%d")
-                            })
-                            fetch_log.append(f"✅ {name}({sid}) {latest_row[date_col].date()} 外資 {net_amt_yi:+.2f}億")
-                        else:
-                            fetch_log.append(f"⚠️ {name}({sid}) 無外資列(name值:{df_s[name_col].unique().tolist()})")
+    sid_chip_cache = {}  # {sid: (三大法人合計買賣超金額, 日期)}
+    sid_pct_cache  = {}  # {sid: 當日漲跌幅%}
+
+    for sid, name in all_sids.items():
+        try:
+            r = requests.get(url, params={
+                "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+                "data_id": sid,
+                "start_date": start_str,
+                "end_date": date_str,
+                "token": FINMIND_TOKEN
+            }, timeout=8)
+            d = r.json()
+
+            if d.get("msg") == "success" and d.get("data"):
+                df_s = pd.DataFrame(d["data"])
+                name_col = next((c for c in df_s.columns if c.lower() == "name"), None)
+                buy_col  = next((c for c in df_s.columns if c.lower() == "buy"), None)
+                sell_col = next((c for c in df_s.columns if c.lower() == "sell"), None)
+                date_col = "date" if "date" in df_s.columns else None
+
+                if name_col and buy_col and sell_col and date_col:
+                    df_s[buy_col]  = pd.to_numeric(df_s[buy_col], errors="coerce").fillna(0)
+                    df_s[sell_col] = pd.to_numeric(df_s[sell_col], errors="coerce").fillna(0)
+                    df_s[date_col] = pd.to_datetime(df_s[date_col])
+
+                    # 篩選三大法人（外資+投信+自營商）
+                    df_inst = df_s[df_s[name_col].astype(str).str.contains(
+                        institutional_pattern, case=False, na=False)].copy()
+
+                    if not df_inst.empty:
+                        latest_date = df_inst[date_col].max()
+                        df_latest = df_inst[df_inst[date_col] == latest_date]
+                        net_amt_yi = (df_latest[buy_col].sum() - df_latest[sell_col].sum()) / 1e8
+                        sid_chip_cache[sid] = (net_amt_yi, latest_date.strftime("%Y-%m-%d"))
+                        matched_names = df_latest[name_col].unique().tolist()
+                        fetch_log.append(f"✅ {name}({sid}) {latest_date.date()} 三大法人合計 {net_amt_yi:+.2f}億 (含:{matched_names})")
                     else:
-                        fetch_log.append(f"❌ {name}({sid}) 欄位不符(有:{list(df_s.columns)})")
+                        fetch_log.append(f"⚠️ {name}({sid}) 無三大法人列(name值:{df_s[name_col].unique().tolist()})")
                 else:
-                    fetch_log.append(f"❌ {name}({sid}) API msg={d.get('msg')}")
-            except Exception as e:
-                fetch_log.append(f"❌ {name}({sid}) 例外:{e}")
+                    fetch_log.append(f"❌ {name}({sid}) 欄位不符(有:{list(df_s.columns)})")
+            else:
+                fetch_log.append(f"❌ {name}({sid}) API msg={d.get('msg')}")
+        except Exception as e:
+            fetch_log.append(f"❌ {name}({sid}) 例外:{e}")
+
+        # 個股當日漲跌幅（用於族群平均漲跌幅展示，比照凱基版面右側「漲跌幅」欄）
+        try:
+            hist, _suffix = yf_history_with_market_fallback(sid, period="2d")
+            if not hist.empty and len(hist) >= 2:
+                pct = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
+                sid_pct_cache[sid] = float(pct)
+        except Exception:
+            pass
+
+    # 依族群彙總
+    for group, stocks in CONCEPT_STOCK_GROUPS.items():
+        amt_sum = 0.0
+        pct_list = []
+        has_data = False
+        for sid in stocks.keys():
+            if sid in sid_chip_cache:
+                amt_sum += sid_chip_cache[sid][0]
+                has_data = True
+            if sid in sid_pct_cache:
+                pct_list.append(sid_pct_cache[sid])
+        if has_data:
+            avg_pct = sum(pct_list) / len(pct_list) if pct_list else 0.0
+            group_results.append({"族群": group, "大戶差 (億)": amt_sum, "漲跌幅": avg_pct})
 
     st.session_state["_chip_fetch_log"] = fetch_log
 
     if not group_results:
-        return get_backup_chips_data()[0], get_backup_chips_data()[1], get_backup_chips_data()[2], fetch_log
+        b, s, info, _ = get_backup_chips_data()
+        return b, s, info, fetch_log
 
-    df_detail = pd.DataFrame(group_results)
-    df_grouped = df_detail.groupby("族群")["外資買賣超(億)"].sum().reset_index()
-    df_grouped.columns = ["族群", "大戶差 (億)"]
+    df_grouped = pd.DataFrame(group_results)
 
-    df_buy_top5  = df_grouped.sort_values("大戶差 (億)", ascending=False).head(5).copy().reset_index(drop=True)
-    df_sell_top5 = df_grouped.sort_values("大戶差 (億)", ascending=True).head(5).copy().reset_index(drop=True)
+    df_buy_top10  = df_grouped.sort_values("大戶差 (億)", ascending=False).head(10).copy().reset_index(drop=True)
+    df_sell_top10 = df_grouped.sort_values("大戶差 (億)", ascending=True).head(10).copy().reset_index(drop=True)
 
-    df_buy_top5.insert(0, "排名", range(1, len(df_buy_top5) + 1))
-    df_sell_top5.insert(0, "排名", range(1, len(df_sell_top5) + 1))
-
-    df_buy_top5_show = df_buy_top5.copy()
-    df_sell_top5_show = df_sell_top5.copy()
-    df_buy_top5_show["大戶差 (億)"]  = df_buy_top5_show["大戶差 (億)"].apply(lambda x: f"+{x:.2f} 億")
-    df_sell_top5_show["大戶差 (億)"] = df_sell_top5_show["大戶差 (億)"].apply(lambda x: f"{x:.2f} 億")
+    df_buy_top10.insert(0, "排名", range(1, len(df_buy_top10) + 1))
+    df_sell_top10.insert(0, "排名", range(1, len(df_sell_top10) + 1))
 
     n_success = len([l for l in fetch_log if l.startswith("✅")])
     n_total   = len(fetch_log)
 
-    return df_buy_top5_show, df_sell_top5_show, f"{date_str}（實際抓取 {n_success}/{n_total} 檔成功）", fetch_log
+    return df_buy_top10, df_sell_top10, f"{date_str}（三大法人合計，實際抓取 {n_success}/{n_total} 檔成功）", fetch_log
+
+@st.cache_data(ttl=900)
+def fetch_market_summary():
+    """市場數據區塊：加權指數、櫃買指數、台指近月漲跌幅"""
+    tickers = {"加權指數": "^TWII", "台指近月": "WTW=F"}
+    out = {}
+    for label, t in tickers.items():
+        try:
+            hist = yf.Ticker(t).history(period="2d")
+            if not hist.empty and len(hist) >= 2:
+                pct = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
+                out[label] = float(pct)
+            else:
+                out[label] = None
+        except Exception:
+            out[label] = None
+    # 櫃買指數 yfinance 代號為 ^TWOII
+    try:
+        hist = yf.Ticker("^TWOII").history(period="2d")
+        if not hist.empty and len(hist) >= 2:
+            pct = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
+            out["櫃買指數"] = float(pct)
+        else:
+            out["櫃買指數"] = None
+    except Exception:
+        out["櫃買指數"] = None
+    return out
 
 result = fetch_tw_chip_data_automated()
-if len(result) == 4:
-    df_automated_buy, df_automated_sell, chip_date_info, chip_fetch_log = result
-else:
-    df_automated_buy, df_automated_sell, chip_date_info = result
-    chip_fetch_log = []
+df_automated_buy, df_automated_sell, chip_date_info, chip_fetch_log = result
+market_summary = fetch_market_summary()
 
-st.markdown(f"### 🎯 每日盤後大戶資金流向統計 (依電子股族群加總外資買賣超 | 籌碼基準日: {chip_date_info})")
+st.markdown(f"### 💰 盤後大戶資金流向（仿凱基期貨版面 | 三大法人合計 | 籌碼基準日: {chip_date_info}）")
+st.caption("大戶在買什麼？賣什麼？一圖秒懂！（族群依概念股分類，大戶差=外資+投信+自營商買賣超合計）")
+
 col_buy, col_sell = st.columns(2)
+
+def _render_chip_table(df, is_buy: bool):
+    if df.empty:
+        st.info("目前無資料")
+        return
+    df_show = df.copy()
+    df_show["大戶差 (億)"] = df_show["大戶差 (億)"].apply(lambda x: f"{'+' if x>=0 else ''}{x:.2f}億")
+    df_show["漲跌幅"] = df_show["漲跌幅"].apply(lambda x: f"{'+' if x>=0 else ''}{x:.2f}%")
+    st.dataframe(df_show, use_container_width=True, hide_index=True)
+
 with col_buy:
-    st.success("🛒 盤後大戶買超 TOP 5 (資金流入主攻部隊)")
-    st.dataframe(df_automated_buy, use_container_width=True, hide_index=True)
+    st.success("🛒 大戶買超 TOP 10 ⬆️")
+    _render_chip_table(df_automated_buy, True)
 with col_sell:
-    st.error("📉 盤後大戶賣超 TOP 5 (資金流出/防範調節)")
-    st.dataframe(df_automated_sell, use_container_width=True, hide_index=True)
+    st.error("📉 大戶賣超 TOP 10 ⬇️")
+    _render_chip_table(df_automated_sell, False)
+
+st.markdown("---")
+
+# ── 市場數據區塊（比照凱基版面：加權指數、櫃買指數、台指近月）──
+st.markdown("#### 📊 市場數據")
+ms_col1, ms_col2, ms_col3 = st.columns(3)
+ms_labels = [("加權指數", ms_col1), ("櫃買指數", ms_col2), ("台指近月", ms_col3)]
+for label, col in ms_labels:
+    val = market_summary.get(label)
+    with col:
+        if val is not None:
+            st.metric(label=label, value=f"{val:+.2f}%", delta=None)
+        else:
+            st.metric(label=label, value="N/A")
+
+st.markdown("---")
+
+# ── 盤勢觀察：依買超/賣超榜首自動生成摘要文字（比照凱基版面風格）──
+st.markdown("#### 💡 盤勢觀察")
+if not df_automated_buy.empty and not df_automated_sell.empty:
+    top_buy_groups = df_automated_buy.head(2)["族群"].tolist()
+    top_sell_groups = df_automated_sell.head(2)["族群"].tolist()
+    buy_str = "、".join(top_buy_groups) if top_buy_groups else "（無資料）"
+    sell_str = "、".join(top_sell_groups) if top_sell_groups else "（無資料）"
+    st.info(
+        f"今日資金聚焦在 **{buy_str}** 等族群供應鏈，買盤強勢吸金；\n\n"
+        f"**{sell_str}** 等族群則出現調節賣壓；\n\n"
+        f"市場呈現輪動格局，選股策略仍為關鍵。"
+    )
+else:
+    st.info("資料不足，暫無法生成盤勢觀察摘要。")
 
 with st.expander("🔍 展開查看本次每檔個股實際抓取明細（診斷用，確認資料是否真實）", expanded=False):
     if chip_fetch_log:
-        st.code("\n".join(chip_fetch_log), language=None)
+        st.code(chr(10).join(chip_fetch_log), language=None)
     else:
         st.warning("無抓取記錄（可能直接使用備援資料）。")
 
@@ -1960,13 +2134,13 @@ with st.expander("⚙️ 六項指標說明", expanded=False):
         st.info("**💸 營業費用YoY>5%**\n最新一季營業費用年增率 > 5%。")
 
 # ==============================================================================
-# 介面：每批 300 檔分頁掃描控制
+# 介面：每批 100 檔分頁掃描控制
 # ==============================================================================
-BATCH_SIZE = 300
+BATCH_SIZE = 100
 all_stock_items = list(ELECTRONIC_STOCK_DB.items())
 n_batches = (len(all_stock_items) + BATCH_SIZE - 1) // BATCH_SIZE
 
-st.markdown("#### 📦 分批掃描設定（每批 300 檔）")
+st.markdown("#### 📦 分批掃描設定（每批 100 檔）")
 st.caption("🎯 預設篩選門檻已設為「符合 ≥4 項指標」— 下方結果區只會列出強力候選股，可在右側調整門檻。")
 batch_options = []
 for b in range(n_batches):
@@ -2378,12 +2552,32 @@ def sc_foreign_5day_consecutive_buy(sid, start, end):
     net_str = ", ".join([f"{int(v):+,}" for v in last5["net"]])
     return passed, f"近5日外資淨買超(股): {net_str}", raw
 
+# ── 工具：自動判斷上市/上櫃，避免 yfinance 抓錯或抓不到 ─────────────────────
+def yf_history_auto(sid: str, period: str):
+    """
+    先試 .TW（上市），若回傳空值則改試 .TWO（上櫃）。
+    這樣不需要手動維護完整的上市/上櫃對照表，對全市場700+檔股票更穩健。
+    """
+    try:
+        hist = yf.Ticker(f"{sid}.TW").history(period=period)
+        if not hist.empty:
+            return hist, ".TW"
+    except Exception:
+        pass
+    try:
+        hist = yf.Ticker(f"{sid}.TWO").history(period=period)
+        if not hist.empty:
+            return hist, ".TWO"
+    except Exception:
+        pass
+    return pd.DataFrame(), None
+
 # ── 模組三-7：收盤價 > MA20 > MA60 ───────────────────────────────────────────
 def sc_ma_bullish_alignment(sid):
     try:
-        hist = yf.Ticker(f"{sid}.TW").history(period="100d")
+        hist, suffix = yf_history_auto(sid, "100d")
         if hist.empty or len(hist) < 60:
-            return False, f"K線資料不足({len(hist)}天)", {}
+            return False, f"K線資料不足({len(hist)}天，市場後綴:{suffix})", {}
         close = hist["Close"]
         ma20 = close.rolling(20).mean()
         ma60 = close.rolling(60).mean()
@@ -2391,7 +2585,7 @@ def sc_ma_bullish_alignment(sid):
         curr_ma20  = float(ma20.iloc[-1])
         curr_ma60  = float(ma60.iloc[-1])
         passed = (curr_close > curr_ma20) and (curr_ma20 > curr_ma60)
-        raw = {"收盤價": round(curr_close, 2), "MA20": round(curr_ma20, 2), "MA60": round(curr_ma60, 2)}
+        raw = {"收盤價": round(curr_close, 2), "MA20": round(curr_ma20, 2), "MA60": round(curr_ma60, 2), "市場": suffix}
         return passed, f"收盤{curr_close:.2f} / MA20={curr_ma20:.2f} / MA60={curr_ma60:.2f}", raw
     except Exception as e:
         return False, f"抓取失敗:{e}", {}
@@ -2399,9 +2593,9 @@ def sc_ma_bullish_alignment(sid):
 # ── 模組三-8：成交量 > 5日均量 × 1.5 ─────────────────────────────────────────
 def sc_volume_breakout(sid):
     try:
-        hist = yf.Ticker(f"{sid}.TW").history(period="20d")
+        hist, suffix = yf_history_auto(sid, "20d")
         if hist.empty or len(hist) < 6:
-            return False, f"成交量資料不足({len(hist)}天)", {}
+            return False, f"成交量資料不足({len(hist)}天，市場後綴:{suffix})", {}
         vol = hist["Volume"]
         curr_vol = float(vol.iloc[-1])
         ma5_vol_prior = float(vol.iloc[-6:-1].mean())  # 不含當日的前5日均量
@@ -2498,11 +2692,11 @@ def sc_run_screen_with_progress(stock_db):
 # ==============================================================================
 # 介面：批次選擇 + 執行
 # ==============================================================================
-SC_BATCH_SIZE = 300
+SC_BATCH_SIZE = 100
 sc_all_items = list(ELECTRONIC_STOCK_DB.items())
 sc_n_batches = (len(sc_all_items) + SC_BATCH_SIZE - 1) // SC_BATCH_SIZE
 
-st.markdown("#### 📦 選股中心｜分批掃描設定（每批 300 檔）")
+st.markdown("#### 📦 選股中心｜分批掃描設定（每批 100 檔）")
 sc_batch_options = []
 for b in range(sc_n_batches):
     s_i = b * SC_BATCH_SIZE
